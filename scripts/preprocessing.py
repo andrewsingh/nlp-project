@@ -4,8 +4,8 @@ from tabulate import tabulate
 
 # path: path to text file
 # analysis: 0 for general preprocessing, 1 for named entity recognition
-# example: preprocess("../data/Development_data/set1/a1.txt", 1)
-def preprocess(path="../data/Development_data/set1/a1.txt", analysis=0):
+# example: preprocess("data/Development_data/set1/a1.txt", 1)
+def preprocess(path="data/Development_data/set1/a1.txt", analysis=0):
 	with open(path, "r") as file:
 		text = file.read()
 		nlp = spacy.load("en_core_web_sm")
