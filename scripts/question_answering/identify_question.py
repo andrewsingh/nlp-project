@@ -9,8 +9,8 @@ yesnowords = ["can", "could", "would", "is", "does", "has", "was", "were", "had"
 commonwords = ["the", "a", "an", "is", "are", "were", "."]
 questionwords = ["who", "what", "where", "when", "why", "how", "whose", "which", "whom"]
 
-def getquestiontype(qwords):
-    
+def getquestiontype(question):
+    qwords = nltk.word_tokenize(question.replace('?', ''))
     questionword = ""
     qidx = -1
 
@@ -54,9 +54,8 @@ def getquestiontype(qwords):
 
 if __name__ == '__main__' :
     question = "Is London a city?"
-    qwords = nltk.word_tokenize(question.replace('?', ''))
     print(question)
-    (qtype, phrase) = getquestiontype(qwords)
+    (qtype, phrase) = getquestiontype(question)
     print(qtype, phrase)
 
     corpus = [

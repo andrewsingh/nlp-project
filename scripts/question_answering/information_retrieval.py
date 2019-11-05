@@ -3,6 +3,7 @@ from spacy import displacy
 from tabulate import tabulate
 from collections import Counter
 from collections import defaultdict
+from rank_bm25 import BM25Okapi
 import pprint
 
 
@@ -12,7 +13,7 @@ pp = pprint.PrettyPrinter(indent=4)
 def get_text(path="data/Development_data/set1/a1.txt"):
 	with open(path, "r") as file:
 		text = file.read()
-		return text
+	return text
 
 
 def tf_idf(sents, query_doc):
@@ -41,16 +42,13 @@ def tf_idf(sents, query_doc):
 	return sent_tf_idfs
 
 
-
-
-
 def filter_sents(doc, labels, query_ents):
 	def has_label(sent):
 		sent_labels = [ent.label_ for ent in sent.ents]
 		for label in labels:
 			if label in sent_labels:
 				return True
-		print("Filtering out: {}".format(sent))
+		#print("Filtering out: {}".format(sent))
 		return False
 
 	def has_query_ent(sent):
@@ -62,22 +60,42 @@ def filter_sents(doc, labels, query_ents):
 	return [sent for sent in doc.sents if has_label(sent) or has_query_ent(sent)]
 
 
+def process_sents(sents):
+	return [sent.lemma_.lower() for sent in sents]
+
+
 def print_entries(entries):
 	for entry in entries:
 		print(entry)
 
 
-def get_entries(query):
+def get_tf_idf(query):
 	query_doc = nlp(query)
 	return tf_idf(filter_sents(doc, labels, query_doc.ents), query_doc)
+
+
+def get_bm25(query, n):
+	query_doc = nlp(query)
+	query_tokenized = [token.lemma_.lower() for token in query_doc]
+	labels = set([ent.label_ for ent in query_doc.ents])
+	sents_processed = process_sents(filter_sents(doc, labels, query_doc.ents))
+	sents_tokenized = [sent.split(" ") for sent in sents_processed]
+	return BM25Okapi(sents_tokenized).get_top_n(query_tokenized, sents_processed, n)
+	#return 
+
+
 
 
 if __name__ == '__main__':
 
 	nlp = spacy.load("en_core_web_lg")
 	text = get_text()
-	#query = "King Djoser"
+	query = "King Djoser is"
+	#reformulations = ["King Djoser was", "was King Djoser"]
 	doc = nlp(text)
+	#sents_processed = process_sents(doc.sents)
+	#bm25 = BM25Okapi(sents)
+
 	#labels = ["PERSON"]
 	#displacy.serve(doc, style="ent")
 	
