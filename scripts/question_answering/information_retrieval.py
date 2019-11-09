@@ -1,6 +1,7 @@
 import spacy
 import pprint
 import itertools
+import numpy as np
 from spacy import displacy
 from spacy.symbols import ORTH
 #from benepar.spacy_plugin import BeneparComponent
@@ -8,6 +9,7 @@ from tabulate import tabulate
 from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
+
 
 
 
@@ -106,17 +108,60 @@ def get_tf_idf(query, labels):
   return tf_idf(filter_sents(doc, labels, query_doc.ents), query_doc)
 
 
-def get_bm25(query, labels, n):
-  query_doc = nlp(query)
-  query_tokenized = [token.lemma_.lower() for token in query_doc]
-  sents_filtered = filter_sents(doc, labels, query_doc.ents)
-  sents_processed = process_sents(sents_filtered)
-  sents_tokenized = [sent.split(" ") for sent in sents_processed]
-  bm25 = BM25Okapi(sents_tokenized)
-  scored_sents = list(zip(bm25.get_scores(query_tokenized), sents_filtered))
-  scored_sents.sort(key=lambda x: x[0], reverse=True)
-  scored_sents = [(round(entry[0], 1), entry[1]) for entry in scored_sents]
-  return scored_sents[:n]
+def lccs(query_tokenized, sent_tokenized):
+  mat = np.zeros((len(query_tokenized) + 1, len(sent_tokenized) + 1))
+  for i in range(1, len(query_tokenized) + 1):
+    for j in range(1, len(sent_tokenized) + 1):
+      if query_tokenized[i - 1] == sent_tokenized[j - 1]:
+        mat[i][j] = mat[i-1][j-1] + 1
+  return np.max(mat)
+
+  # query_indices = [(query_tokenized[i], i) for i in range(len(query_tokenized))]
+  # query_dict = defaultdict(lambda: -1, query_indices)
+  # query_ints = [query_dict[tok] for tok in query_tokenized]
+  # sent_ints = [query_dict[tok] for tok in sent_tokenized]
+  
+  # finished_seq_lens = []
+  # query_indices = [(query_tokenized[i], i) for i in range(len(query_tokenized))]
+  # query_dict = dict.fromkeys(query_tokenized, None)
+  # for key in query_dict:
+  #   query_dict[key] = []
+  # for (tok, idx) in query_indices:
+  #   query_dict[tok].append(idx)
+    
+  # current_seqs = []
+  # for i in range(len(sent_tokenized)):
+  #   print(i)
+  #   if sent_tokenized[i] in query_dict:
+  #     idx_vals = query_dict[sent_tokenized[i]]
+  #     for idx_val in idx_vals:
+  #       if len(current_seqs) == 0:
+  #           current_seqs.append([idx_val])
+  #       else:
+  #         added = False
+  #         for current_seq in current_seqs:
+  #           if idx_val == current_seq[-1] + 1:
+  #             current_seq.append(idx_val)
+  #             added = True
+  #           else:
+  #             print(current_seq)
+  #             finished_seq_lens.append(len(current_seq))
+  #         if not added:
+  #           current_seqs.append([idx_val])
+  #   else:
+  #     if len(current_seq) > 0:
+  #       print(current_seq)
+  #       finished_seq_lens.append(len(current_seq))
+  #       current_seq = []
+
+  # if len(current_seq) > 0:
+  #       print(current_seq)
+  #       finished_seq_lens.append(len(current_seq))
+
+  # if len(finished_seq_lens) == 0:
+  #   return 0
+  # else:
+  #   return max(finished_seq_lens)
 
 
 def ave_dist(query, labels, n):
@@ -152,6 +197,21 @@ def ave_dist(query, labels, n):
   sents_scored = [(ave_dist_sent(sents_tokenized[i]), sents_filtered[i]) for i in range(len(sents_tokenized))]
   sents_scored.sort(key=lambda x: x[0])
   return sents_scored[:n]
+
+
+def get_bm25(query, labels, n):
+  query_doc = nlp(query)
+  query_tokenized = [token.lemma_.lower() for token in query_doc]
+  sents_filtered = filter_sents(doc, labels, query_doc.ents)
+  sents_processed = process_sents(sents_filtered)
+  sents_tokenized = [sent.split(" ") for sent in sents_processed]
+  bm25 = BM25Okapi(sents_tokenized)
+  lccs_scores = [lccs(query_tokenized, sent_tokenized) for sent_tokenized in sents_tokenized]
+  ave_dist_scores = ave_dist(query, labels, n)
+  scored_sents = list(zip(bm25.get_scores(query_tokenized), lccs_scores, ave_dist_scores, sents_filtered))
+  scored_sents.sort(key=lambda x: x[0], reverse=True)
+  scored_sents = [(round(entry[0], 1), entry[1], entry[2]) for entry in scored_sents]
+  return scored_sents[:n]
 
 
 def pattern_match(question):
@@ -217,6 +277,16 @@ if __name__ == '__main__':
   text = get_text("data/Development_data/set5/a1.txt")
   #question = "Who is King Djoser?"
   doc = nlp(text)
+  query = "The domestic dog is a member of the genus"
+  # labels = []
+  # query_doc = nlp(query)
+  # query_tokenized = [token.lemma_.lower() for token in query_doc]
+  # sents_filtered = filter_sents(doc, labels, query_doc.ents)
+  # sents_processed = process_sents(sents_filtered)
+  # sents_tokenized = [sent.split(" ") for sent in sents_processed]
+  # q = query_tokenized
+  # s = sents_tokenized[64]
+
   #print(doc._.has_coref)
   #print_entries(doc._.coref_clusters)
   #print(doc._.coref_resolved)
