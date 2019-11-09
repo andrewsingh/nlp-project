@@ -56,7 +56,7 @@ def filter_sents(doc, labels, query_ents):
   if len(labels) > 0:
     return [sent for sent in doc.sents if has_label(sent) or has_query_ent(sent)]
   else:
-    return list(doc.sents)
+    return [sent for sent in doc.sents if len(process_sent(sent)) > 0]
 
 
 def process_sents(sents):
@@ -104,9 +104,6 @@ def lemmatize_query(query_doc, sent):
 def get_matched_no_stop_words(query_doc, sent):
   query_p = process_sent(query_doc, True)
   sent_p = process_sent(sent, True)
-  print(query_p)
-  print(sent_p)
-  print(intersection(query_p, sent_p))
   return len(intersection(query_p, sent_p))
 
 
@@ -160,37 +157,36 @@ def lccs(query_tokenized, sent_tokenized):
   return np.max(mat)
 
 
-def ave_dist(query, labels, n):
-  def get_dist(sent_tokenized, a, b):
-    if a in sent_tokenized and b in sent_tokenized:
+
+def ave_dist(query, labels, n, no_stop=False):
+  def get_dist(sent_processed, a, b):
+    if a in sent_processed and b in sent_processed:
       last_a = -1
       last_b = -1
       pairs = []
-      for i in range(len(sent_tokenized)):
-        if sent_tokenized[i] == a:
+      for i in range(len(sent_processed)):
+        if sent_processed[i] == a:
           last_a = i
           if last_b >= 0:
             pairs.append((last_a, last_b))
-        elif sent_tokenized[i] == b:
+        elif sent_processed[i] == b:
           last_b = i
           if last_a >= 0:
             pairs.append((last_b, last_a))
       return min([abs(pair[0] - pair[1]) for pair in pairs])
     else:
-      return len(sent_tokenized)
+      return len(sent_processed)
 
   query_doc = nlp(query)
-  query_tokenized = [token.lemma_.lower() for token in query_doc]
-  sents_filtered = filter_sents(doc, labels, query_doc.ents)
-  sents_processed = process_sents(sents_filtered)
-  sents_tokenized = [sent.split(" ") for sent in sents_processed]
-  query_unique_toks = list(set(query_tokenized))
+  query_processed = process_sent(query_doc, no_stop)
+  sents_processed = [process_sent(sent, no_stop) for sent in sents_filtered]
+  query_unique_toks = list(set(query_processed))
   pair_indices = list(itertools.combinations(range(len(query_unique_toks)), 2))
   
   def ave_dist_sent(sent_tokenized):
     return sum([get_dist(sent_tokenized, query_unique_toks[pair[0]], query_unique_toks[pair[1]]) for pair in pair_indices]) / len(pair_indices)
 
-  sents_scored = [(ave_dist_sent(sents_tokenized[i]), sents_filtered[i]) for i in range(len(sents_tokenized))]
+  sents_scored = [(ave_dist_sent(sents_processed[i]), sents_filtered[i]) for i in range(len(sents_processed))]
   sents_scored.sort(key=lambda x: x[0])
   return sents_scored[:n]
 
@@ -200,18 +196,18 @@ def get_bm25(query, labels, n):
   query_doc = nlp(query)
   query_processed = process_sent(query_doc)
   sents_filtered = filter_sents(doc, labels, query_doc.ents)
-  #sents_processed = process_sents(sents_filtered)
   sents_processed = [process_sent(sent) for sent in sents_filtered]
-  #query_lemmatizations = [lemmatize_query(query_doc, sent) for sent in sents_filtered]
-  #bm25_scores = [bm25.get_scores(query_lemmatizations[i])[i] for i in range(len(query_lemmatizations))]
-  #sents_tokenized = [sent.split(" ") for sent in sents_processed]
   bm25 = BM25Okapi(sents_tokenized)
-  lccs_scores = [lccs(query_tokenized, sent_processed) for sent_processed in sents_processed]
-  #ave_dist_scores = ave_dist(query, labels, n)
+  lccs_scores = [lccs(query_processed, sent_processed) for sent_processed in sents_processed]
+  ave_dist_scores = ave_dist(query, labels, n)
   match_scores = [get_matched_no_stop_words(query_doc, sent) for sent in sents_filtered]
-  scored_sents = list(zip(bm25.get_scores(query_tokenized), lccs_scores, match_scores, sents_filtered))
+  assert(len(lccs_scores) == len(sents_filtered))
+  assert(len(ave_dist_scores) == len(sents_filtered))
+  assert(len(match_scores) == len(sents_filtered))
+  assert(len(bm25.get_scores(query_processed)) == len(sents_filtered))
+  scored_sents = list(zip(bm25.get_scores(query_processed), lccs_scores, ave_dist_scores, match_scores, sents_filtered))
   scored_sents.sort(key=lambda x: x[0], reverse=True)
-  scored_sents = [(round(entry[0], 1), entry[1], entry[2], entry[3]) for entry in scored_sents]
+  scored_sents = [(round(entry[0], 1), entry[1], entry[2], entry[3], entry[4]) for entry in scored_sents]
   return scored_sents[:n]
 
 
@@ -285,7 +281,8 @@ if __name__ == '__main__':
   qd = query_doc
   sd = sents_filtered[64]
 
-  qsm = nlp("The smallest adult dog was")
+  qsm = "The smallest adult dog was"
+  qsm_doc = nlp(qsm)
   ssm = sents_filtered[77]
 
   #print(doc._.has_coref)
