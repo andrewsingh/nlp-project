@@ -11,8 +11,6 @@ from collections import defaultdict
 from rank_bm25 import BM25Okapi
 
 
-
-
 pp = pprint.PrettyPrinter(indent=4)
 
 
@@ -30,33 +28,7 @@ def get_text(path="data/Development_data/set1/a1.txt"):
     sents = [line for line in trim(lines) if "." in line]
 
   return "".join(sents)
-
-
-def tf_idf(sents, query_doc):
-  lemmatized_sents = [sent.lemma_.lower() for sent in sents]
-  #print(lemmatized_sents)
-  num_sents = len(lemmatized_sents)
-  idf_dict = defaultdict(lambda: 0)
-  for sent in sents:
-    token_lemmas = set([token.lemma_.lower() for token in sent])
-    for token_lemma in token_lemmas:
-      idf_dict[token_lemma] += 1
-  pp.pprint(idf_dict)
-  sent_tf_idfs = []
-  for sent in lemmatized_sents:
-    token_tf_idfs = []
-    for token in query_doc:
-      token_lemma = token.lemma_.lower()
-      #print(token_lemma)
-      tf = sent.count(token_lemma) / len(sent)
-      idf = num_sents / (1 + idf_dict[token_lemma])
-      token_tf_idfs.append((tf * idf))
-      #print("{}\n{}\n{}, {}\n================".format(token_lemma, sent, tf, idf))
-    sent_tf_idfs.append((sent, sum(token_tf_idfs)))
-
-  sent_tf_idfs.sort(key=lambda x: x[1], reverse=True)
-  return sent_tf_idfs
-
+  
 
 def filter_sents(doc, labels, query_ents):
   # NER sometimes mistakes persons for orgs and vice versa
@@ -96,17 +68,88 @@ def print_list(l):
     print(elem)
 
 
-
 def print_list2(l):
   for l2 in l:
     for elem in l2:
       print(elem)
 
 
-def get_tf_idf(query, labels):
-  query_doc = nlp(query)
-  return tf_idf(filter_sents(doc, labels, query_doc.ents), query_doc)
+def process_sent(sent, no_stop=False):
+  return [tok.lemma_.lower() for tok in sent if not tok.is_punct and not (no_stop and tok.is_stop)]
 
+
+def filter_sent(sent, no_stop=False):
+  return [tok for tok in sent if not tok.is_punct and not (no_stop and tok.is_stop)]
+
+
+def intersection(a, b):
+  return [elem for elem in a if elem in b]
+
+
+def lemmatize_query(query_doc, sent):
+  result = []
+  query_filtered = filter_sent(query_doc)
+  sent_filtered = filter_sent(sent)
+  sent_toks_text = [tok.text for tok in sent]
+  sent_toks = list(sent_filtered)
+  for tok in query_filtered:
+    if tok.text in sent_toks_text:
+      idx = sent_toks_text.index(tok.text)
+      result.append(sent_toks[idx].lemma_.lower())
+    else:
+      result.append(tok.lemma_.lower())
+  return result
+
+
+def get_matched_no_stop_words(query_doc, sent):
+  query_p = process_sent(query_doc, True)
+  sent_p = process_sent(sent, True)
+  print(query_p)
+  print(sent_p)
+  print(intersection(query_p, sent_p))
+  return len(intersection(query_p, sent_p))
+
+
+def get_sent(ex):
+  ex_doc = nlp(ex)
+  return list(ex_doc.sents)[0]
+
+
+def serve_dep(ex):
+  displacy.serve(ex, style="dep")
+
+
+
+
+
+
+def tf_idf(query, labels, n):
+  query_doc = nlp(query)
+  query_tokenized = [token.lemma_.lower() for token in query_doc]
+  sents_filtered = filter_sents(doc, labels, query_doc.ents)
+  sents_processed = process_sents(sents_filtered)
+  sents_tokenized = [sent.split(" ") for sent in sents_processed]
+
+  def tf_idf_sent(sent_tokenized):
+    token_tf_idfs = []
+    for query_tok in query_tokenized:
+      tf = sent_tokenized.count(query_tok) / len(sent_tokenized)
+      idf = num_sents / (1 + idf_dict[query_tok])
+      token_tf_idfs.append((tf * idf))
+      #print("{}\n{}\n{}, {}\n================".format(token_lemma, sent, tf, idf))
+    return sum(token_tf_idfs)
+
+  num_sents = len(sents_tokenized)
+  idf_dict = defaultdict(lambda: 0)
+  for sent_tokenized in sents_tokenized:
+    for tok in sent_tokenized:
+      idf_dict[tok] += 1
+  #pp.pprint(idf_dict)
+  sent_tf_idfs = [(tf_idf_sent(sents_tokenized[i]), sents_filtered[i]) for i in range(num_sents)]
+  sent_tf_idfs.sort(key=lambda x: x[0], reverse=True)
+  return sent_tf_idfs[:n]
+
+    
 
 def lccs(query_tokenized, sent_tokenized):
   mat = np.zeros((len(query_tokenized) + 1, len(sent_tokenized) + 1))
@@ -115,53 +158,6 @@ def lccs(query_tokenized, sent_tokenized):
       if query_tokenized[i - 1] == sent_tokenized[j - 1]:
         mat[i][j] = mat[i-1][j-1] + 1
   return np.max(mat)
-
-  # query_indices = [(query_tokenized[i], i) for i in range(len(query_tokenized))]
-  # query_dict = defaultdict(lambda: -1, query_indices)
-  # query_ints = [query_dict[tok] for tok in query_tokenized]
-  # sent_ints = [query_dict[tok] for tok in sent_tokenized]
-  
-  # finished_seq_lens = []
-  # query_indices = [(query_tokenized[i], i) for i in range(len(query_tokenized))]
-  # query_dict = dict.fromkeys(query_tokenized, None)
-  # for key in query_dict:
-  #   query_dict[key] = []
-  # for (tok, idx) in query_indices:
-  #   query_dict[tok].append(idx)
-    
-  # current_seqs = []
-  # for i in range(len(sent_tokenized)):
-  #   print(i)
-  #   if sent_tokenized[i] in query_dict:
-  #     idx_vals = query_dict[sent_tokenized[i]]
-  #     for idx_val in idx_vals:
-  #       if len(current_seqs) == 0:
-  #           current_seqs.append([idx_val])
-  #       else:
-  #         added = False
-  #         for current_seq in current_seqs:
-  #           if idx_val == current_seq[-1] + 1:
-  #             current_seq.append(idx_val)
-  #             added = True
-  #           else:
-  #             print(current_seq)
-  #             finished_seq_lens.append(len(current_seq))
-  #         if not added:
-  #           current_seqs.append([idx_val])
-  #   else:
-  #     if len(current_seq) > 0:
-  #       print(current_seq)
-  #       finished_seq_lens.append(len(current_seq))
-  #       current_seq = []
-
-  # if len(current_seq) > 0:
-  #       print(current_seq)
-  #       finished_seq_lens.append(len(current_seq))
-
-  # if len(finished_seq_lens) == 0:
-  #   return 0
-  # else:
-  #   return max(finished_seq_lens)
 
 
 def ave_dist(query, labels, n):
@@ -199,19 +195,25 @@ def ave_dist(query, labels, n):
   return sents_scored[:n]
 
 
+
 def get_bm25(query, labels, n):
   query_doc = nlp(query)
-  query_tokenized = [token.lemma_.lower() for token in query_doc]
+  query_processed = process_sent(query_doc)
   sents_filtered = filter_sents(doc, labels, query_doc.ents)
-  sents_processed = process_sents(sents_filtered)
-  sents_tokenized = [sent.split(" ") for sent in sents_processed]
+  #sents_processed = process_sents(sents_filtered)
+  sents_processed = [process_sent(sent) for sent in sents_filtered]
+  #query_lemmatizations = [lemmatize_query(query_doc, sent) for sent in sents_filtered]
+  #bm25_scores = [bm25.get_scores(query_lemmatizations[i])[i] for i in range(len(query_lemmatizations))]
+  #sents_tokenized = [sent.split(" ") for sent in sents_processed]
   bm25 = BM25Okapi(sents_tokenized)
-  lccs_scores = [lccs(query_tokenized, sent_tokenized) for sent_tokenized in sents_tokenized]
-  ave_dist_scores = ave_dist(query, labels, n)
-  scored_sents = list(zip(bm25.get_scores(query_tokenized), lccs_scores, ave_dist_scores, sents_filtered))
+  lccs_scores = [lccs(query_tokenized, sent_processed) for sent_processed in sents_processed]
+  #ave_dist_scores = ave_dist(query, labels, n)
+  match_scores = [get_matched_no_stop_words(query_doc, sent) for sent in sents_filtered]
+  scored_sents = list(zip(bm25.get_scores(query_tokenized), lccs_scores, match_scores, sents_filtered))
   scored_sents.sort(key=lambda x: x[0], reverse=True)
-  scored_sents = [(round(entry[0], 1), entry[1], entry[2]) for entry in scored_sents]
+  scored_sents = [(round(entry[0], 1), entry[1], entry[2], entry[3]) for entry in scored_sents]
   return scored_sents[:n]
+
 
 
 def pattern_match(question):
@@ -256,13 +258,7 @@ def pattern_match(question):
   return "Fail 1"
 
 
-def get_sent(ex):
-  ex_doc = nlp(ex)
-  return list(ex_doc.sents)[0]
 
-
-def serve_dep(ex):
-  displacy.serve(ex, style="dep")
 
 
 
@@ -278,14 +274,19 @@ if __name__ == '__main__':
   #question = "Who is King Djoser?"
   doc = nlp(text)
   query = "The domestic dog is a member of the genus"
-  # labels = []
-  # query_doc = nlp(query)
-  # query_tokenized = [token.lemma_.lower() for token in query_doc]
-  # sents_filtered = filter_sents(doc, labels, query_doc.ents)
-  # sents_processed = process_sents(sents_filtered)
-  # sents_tokenized = [sent.split(" ") for sent in sents_processed]
-  # q = query_tokenized
-  # s = sents_tokenized[64]
+  labels = []
+  query_doc = nlp(query)
+  query_tokenized = [token.lemma_.lower() for token in query_doc]
+  sents_filtered = filter_sents(doc, labels, query_doc.ents)
+  sents_processed = process_sents(sents_filtered)
+  sents_tokenized = [sent.split(" ") for sent in sents_processed]
+  q = query_tokenized
+  s = sents_tokenized[64]
+  qd = query_doc
+  sd = sents_filtered[64]
+
+  qsm = nlp("The smallest adult dog was")
+  ssm = sents_filtered[77]
 
   #print(doc._.has_coref)
   #print_entries(doc._.coref_clusters)
