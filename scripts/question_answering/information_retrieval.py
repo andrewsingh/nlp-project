@@ -198,16 +198,16 @@ def get_bm25(query, labels, n):
   sents_filtered = filter_sents(doc, labels, query_doc.ents)
   sents_processed = [process_sent(sent) for sent in sents_filtered]
   bm25 = BM25Okapi(sents_tokenized)
-  lccs_scores = [lccs(query_processed, sent_processed) for sent_processed in sents_processed]
-  ave_dist_scores = ave_dist(query, labels, n)
-  match_scores = [get_matched_no_stop_words(query_doc, sent) for sent in sents_filtered]
-  assert(len(lccs_scores) == len(sents_filtered))
-  assert(len(ave_dist_scores) == len(sents_filtered))
-  assert(len(match_scores) == len(sents_filtered))
-  assert(len(bm25.get_scores(query_processed)) == len(sents_filtered))
-  scored_sents = list(zip(bm25.get_scores(query_processed), lccs_scores, ave_dist_scores, match_scores, sents_filtered))
+  # lccs_scores = [lccs(query_processed, sent_processed) for sent_processed in sents_processed]
+  # ave_dist_scores = ave_dist(query, labels, n)
+  # match_scores = [get_matched_no_stop_words(query_doc, sent) for sent in sents_filtered]
+  # assert(len(lccs_scores) == len(sents_filtered))
+  # assert(len(ave_dist_scores) == len(sents_filtered))
+  # assert(len(match_scores) == len(sents_filtered))
+  # assert(len(bm25.get_scores(query_processed)) == len(sents_filtered))
+  scored_sents = list(zip(bm25.get_scores(query_processed), sents_filtered))
   scored_sents.sort(key=lambda x: x[0], reverse=True)
-  scored_sents = [(round(entry[0], 1), entry[1], entry[2], entry[3], entry[4]) for entry in scored_sents]
+  scored_sents = [(round(entry[0], 1), entry[1]) for entry in scored_sents]
   return scored_sents[:n]
 
 
