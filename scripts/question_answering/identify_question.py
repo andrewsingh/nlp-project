@@ -14,7 +14,7 @@ commonwords = ["the", "a", "an", "is", "are", "were", "."]
 questionwords = ["who", "what", "where", "when", "why", "how", "whose", "which", "whom"]
 choicewords = ["or", "either", ]
 
-def getquestiontype(qwords):
+def getquestiontype(question):
     qwords = nltk.word_tokenize(question.replace('?', ''))
     questionword = ""
     qidx = -1
