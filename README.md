@@ -1,7 +1,7 @@
 # nlp-project
 Project for 11-411 Natural Language Processing
 
-## Running the question answering script
+## Running the question answering testing script
 Checkout the repo and cd to the root.
 Then install the requirements by running \
 `pip install scripts/question_answering/qa_requirements.txt` 
