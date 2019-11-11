@@ -1,0 +1,6 @@
+tabulate==0.8.5
+numpy==1.17.3
+spacy==2.2.2
+rank_bm25==0.2
+en-core-web-lg==2.2.0
+
