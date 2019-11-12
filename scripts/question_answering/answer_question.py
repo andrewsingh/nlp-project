@@ -4,7 +4,6 @@ import numpy as np
 import sys
 from spacy import displacy
 from spacy.symbols import ORTH
-from tabulate import tabulate
 from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
