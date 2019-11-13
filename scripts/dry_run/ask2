@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+
+import spacy
+import sys
+from spacy import displacy
+from spacy.symbols import ORTH
+
+
+
+def get_text(path):
+  def trim(lines):
+    for i in range(len(lines)):
+      line_txt = lines[i].replace("\n", "")
+      if line_txt == "See also" or line_txt == "Notes" or line_txt == "References":
+        return lines[:i]
+    return lines
+
+  with open(path, "r") as file:
+    lines = file.readlines()
+    sents = [line for line in trim(lines) if "." in line]
+
+  return "".join(sents)
+
+
+def generate_questions(doc, n):
+    questions = []
+    for ent in doc.ents:
+        if ent.label_ == "PERSON":
+            questions.append("Who is {}?".format(ent.text))
+        elif ent.label_ == "ORG":
+            questions.append("What is {}?".format(ent.text))
+        elif ent.label_ in ["FAC", "GPE", "LOC"]:
+            questions.append("What is in {}?".format(ent.text))
+        elif ent.label_ == "DATE":
+            questions.append("What happened in {}?".format(ent.text))
+    questions = list(set(questions))
+    return questions[:n]
+
+
+
+if __name__ == '__main__':
+  args = sys.argv
+  if len(args) >= 3:
+    article_path = str(args[1])
+    num_questions = int(args[2])
+    text = get_text(article_path)
+    nlp = spacy.load("en_core_web_lg")
+    sc1 = [{ORTH: "ca."}]
+    nlp.tokenizer.add_special_case("ca.", sc1)
+    doc = nlp(text)
+    questions = generate_questions(doc, num_questions)
+    for question in questions:
+        print(question)
+
+    
+
+
+
