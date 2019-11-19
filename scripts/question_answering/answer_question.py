@@ -92,6 +92,21 @@ def flatten(nested_list):
 
 # ============= more complex helper functions =============
 
+def stem_query(query, sent):
+  result = []
+  query_processed = process(query)
+  sent_processed = process(sent)
+  sent_toks = list(sent_processed)
+  sent_toks_text = [tok.text for tok in sent_toks]
+  for tok in query_processed:
+    if tok.text in sent_toks_text:
+      idx = sent_toks_text.index(tok.text)
+      result.append(sent_toks[idx].lemma_.lower())
+    else:
+      result.append(tok.lemma_.lower())
+  return result
+
+
 def filter_sents_ner(doc, labels, query_ents):
   def has_label(sent):
     sent_labels = [ent.label_ for ent in sent.ents]
@@ -172,26 +187,72 @@ def process_question(question_text):
   return (answer_type, query)
 
 
+def lccs(query_tokenized, sent_tokenized):
+  mat = np.zeros((len(query_tokenized) + 1, len(sent_tokenized) + 1))
+  for i in range(1, len(query_tokenized) + 1):
+    for j in range(1, len(sent_tokenized) + 1):
+      if query_tokenized[i - 1] == sent_tokenized[j - 1]:
+        mat[i][j] = mat[i-1][j-1] + 1
+  return np.max(mat)
+
+
+def ave_dist_sent(query, sent_stem_lower, no_stop=False):
+  def get_dist(sent_stem_lower, a, b):
+    if a in sent_stem_lower and b in sent_stem_lower:
+      last_a = -1
+      last_b = -1
+      pairs = []
+      for i in range(len(sent_stem_lower)):
+        if sent_stem_lower[i] == a:
+          last_a = i
+          if last_b >= 0:
+            pairs.append((last_a, last_b))
+        elif sent_stem_lower[i] == b:
+          last_b = i
+          if last_a >= 0:
+            pairs.append((last_b, last_a))
+      return min([abs(pair[0] - pair[1]) for pair in pairs])
+    else:
+      return len(sent_stem_lower)
+
+  query_stem_lower = stem_and_lower(query, no_stop)
+  query_unique_toks = list(set(query_stem_lower))
+  pair_indices = list(itertools.combinations(range(len(query_unique_toks)), 2))
+  return sum([get_dist(sent_stem_lower, query_unique_toks[pair[0]], query_unique_toks[pair[1]]) for pair in pair_indices]) / len(pair_indices)
+
+
 def get_bm25(query, labels, n):
   query_stem_lower = stem_and_lower(query)
   sents_filtered = filter_sents_ner(doc, labels, query.ents)
-  sents_processed = [stem_and_lower(sent) for sent in sents_filtered]
-  bm25 = BM25Okapi(sents_processed)
-  scored_sents = list(zip(bm25.get_scores(query_stem_lower), sents_filtered))
+  queries_stem = [stem_query(query, sent) for sent in sents_filtered]
+  sents_stem_lower = [stem_and_lower(sent) for sent in sents_filtered]
+  bm25 = BM25Okapi(sents_stem_lower)
+  assert(len(queries_stem) == len(sents_filtered))
+  scored_sents = [(bm25.get_scores(queries_stem[i])[i], sents_filtered[i]) for i in range(len(sents_filtered))]
+  assert(len(scored_sents) == len(sents_filtered))
+  #ave_dist_scores = [ave_dist_sent(query, sent_stem_lower) for sent_stem_lower in sents_stem_lower]
+  #lccs_scores = [lccs(query_stem_lower, sent_stem_lower) for sent_stem_lower in sents_stem_lower]
+  #print(ave_dist_scores)
+  #scored_sents = list(zip(bm25.get_scores(query_stem_lower), ave_dist_scores, lccs_scores, sents_filtered))
   scored_sents.sort(key=lambda x: x[0], reverse=True)
+  #scored_sents = [(round(entry[0], 1), round(entry[1], 1), entry[2], entry[3]) for entry in scored_sents]
   scored_sents = [(round(entry[0], 1), entry[1]) for entry in scored_sents]
   return scored_sents[:n]
 
 
+# TODO: add comments
 def pattern_match(question_text):
   def match_defn12(sent, subj, defn_num):
+    # match the first two patterns (x is answer, answer is x)
+    # if defn_num is 1, matches first pattern, else matches second pattern
     subj_word = subj.text.lower()
     if defn_num == 1:
       subj_dep = "nsubj"
     else:
       subj_dep = "attr"
     for tok in sent:
-      if tok.lemma_ == "be" and tok.pos_ in ["VERB", "AUX"]:
+      if tok.lemma_ == "be" and tok.pos_ in ["VERB", "AUX"]: # is, are, am, be, etc.
+        # get the children of the aux verb in the dependency parse
         tok_children_text = [child.text.lower() for child in list(tok.children)]
         if subj_word in tok_children_text:
           subj_idx = tok_children_text.index(subj_word)
@@ -209,18 +270,23 @@ def pattern_match(question_text):
 
   question = nlp(question_text)
   question_processed = process(question)
-  question_stem_lower = stem_and_lower(question)
-  if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
-    subjs = [tok for tok in list(question_processed[1].children) if (tok.dep_ in ["attr", "nsubj"]) \
-              and (tok.pos_ in ["NOUN", "PROPN"])]
-    if len(subjs) == 1:
-      subj = subjs[0]
-      #print("subj: " + subj.text)
-      matches1 = [sent for sent in doc.sents if match_defn12(sent, subj, 1)]
-      matches2 = [sent for sent in doc.sents if match_defn12(sent, subj, 2)]
-      matches_appos = [sent for sent in doc.sents if match_defn_appos(sent, subj)]
-      return [matches1, matches2, matches_appos]
-    
+  question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
+  """ question should only have one verb; we want to pattern match "What is a dog", but not
+      "What is a dog classified as" (the ranking function can handle the second example)
+  """
+  if len(question_verbs) == 1:
+    question_stem_lower = stem_and_lower(question)
+    if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
+      subjs = [tok for tok in list(question_processed[1].children) if (tok.dep_ in ["attr", "nsubj"]) \
+                and (tok.pos_ in ["NOUN", "PROPN"])]
+      if len(subjs) == 1:
+        subj = subjs[0]
+        #print("Pattern match subj: " + subj.text)
+        matches1 = [sent for sent in doc.sents if match_defn12(sent, subj, 1)]
+        matches2 = [sent for sent in doc.sents if match_defn12(sent, subj, 2)]
+        matches_appos = [sent for sent in doc.sents if match_defn_appos(sent, subj)]
+        return [matches1, matches2, matches_appos]
+      
   return []
 
 
@@ -232,8 +298,10 @@ def get_best_sent(question_text):
   print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
   pattern_matches = flatten(pattern_match(question_text))
   if len(pattern_matches) > 0:
+    print("Retrieval method: pattern match")
     return pattern_matches[0].text
   else:
+    print("Retrieval method: ranking function")
     labels = ENTITY_MAP[answer_type]
     ranked_sents = get_bm25(query, labels, 1)
     if len(ranked_sents) > 0:
