@@ -7,6 +7,7 @@ from spacy.symbols import ORTH
 from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
+from bert import QA
 
 
 YES_NO_WORDS = ["can", "could", "would", "is", "does", "has", "was", "were", "had", "have", "did", "are", "will"]
@@ -240,7 +241,7 @@ def get_bm25(query, labels, n):
   return scored_sents[:n]
 
 
-# TODO: add comments
+# TODO: fix and add comments
 def pattern_match(question_text):
   def match_defn12(sent, subj, defn_num):
     # match the first two patterns (x is answer, answer is x)
@@ -268,15 +269,30 @@ def pattern_match(question_text):
           return True
     return False
 
+  def all_stop(sent):
+    for tok in sent:
+      if not tok.is_stop:
+        return False
+    return True
+
   question = nlp(question_text)
   question_processed = process(question)
-  question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
-  """ question should only have one verb; we want to pattern match "What is a dog", but not
-      "What is a dog classified as" (the ranking function can handle the second example)
-  """
-  if len(question_verbs) == 1:
-    question_stem_lower = stem_and_lower(question)
-    if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
+  question_stem_lower = stem_and_lower(question)
+
+  if question_stem_lower[0] in ["who", "what", "where", "when"] and question_stem_lower[1] == "be" and len(question.ents) == 1:
+    qent = question.ents[0]
+    qremain = question_processed[:qent.start] + question_processed[qent.end:]
+    pred_remain = qremain[2:]
+
+    # TODO: fix this
+
+    #if all_stop(pred_remain):
+    question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
+    """ question should only have one verb; we want to pattern match "What is a dog", but not
+        "What is a dog classified as" (the ranking function can handle the second example)
+    """
+    if len(question_verbs) == 1:
+    #if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
       subjs = [tok for tok in list(question_processed[1].children) if (tok.dep_ in ["attr", "nsubj"]) \
                 and (tok.pos_ in ["NOUN", "PROPN"])]
       if len(subjs) == 1:
@@ -293,21 +309,24 @@ def pattern_match(question_text):
 
 # ============= testing function to be called by user =============
 
-def get_best_sent(question_text):
+def get_best_sent(question_text, verbose=True):
   (answer_type, query) = process_question(question_text)
-  print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
+  if verbose:
+    print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
   pattern_matches = flatten(pattern_match(question_text))
   if len(pattern_matches) > 0:
-    print("Retrieval method: pattern match")
-    return pattern_matches[0].text
+    if verbose:
+      print("Retrieval method: pattern match")
+    return pattern_matches[0].text.replace("\n", "")
   else:
-    print("Retrieval method: ranking function")
+    if verbose:
+      print("Retrieval method: ranking function")
     labels = ENTITY_MAP[answer_type]
     ranked_sents = get_bm25(query, labels, 1)
     if len(ranked_sents) > 0:
-      return ranked_sents[0][1].text
+      return ranked_sents[0][1].text.replace("\n", "")
     else:
-      return list(doc.sents)[0].text
+      return list(doc.sents)[0].text.replace("\n", "")
 
   
 
@@ -322,6 +341,8 @@ if __name__ == '__main__':
     sc1 = [{ORTH: "ca."}]
     nlp.tokenizer.add_special_case("ca.", sc1)
     doc = nlp(text)
+
+    model = QA("model")
 
 
 
