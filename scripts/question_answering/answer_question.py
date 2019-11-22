@@ -1,13 +1,14 @@
 import spacy
 import itertools
 import numpy as np
+import torch
 import sys
 from spacy import displacy
 from spacy.symbols import ORTH
 from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
-from bert import QA
+from transformers import BertTokenizer, BertForQuestionAnswering
 
 
 YES_NO_WORDS = ["can", "could", "would", "is", "does", "has", "was", "were", "had", "have", "did", "are", "will"]
@@ -307,6 +308,50 @@ def pattern_match(question_text):
 
 
 
+
+
+def extract_answer(question_text, sentence_text):
+  # question_toks = [tok.text.lower() for tok in nlp(question_text)]
+  # sentence_toks = [tok.text.lower() for tok in nlp(sentence_text)]
+  # question_ids = bert_tokenizer.convert_tokens_to_ids(question_toks)
+  # sentence_ids = bert_tokenizer.convert_tokens_to_ids(sentence_toks)
+
+  print("Question:\n{}".format(question_text))
+  print("Sentence:\n{}".format(sentence_text))
+
+  question_ids = bert_tokenizer.encode(question_text)
+  sentence_ids = bert_tokenizer.encode(sentence_text)
+
+  input_ids = bert_tokenizer.build_inputs_with_special_tokens(question_ids, sentence_ids)
+  input_tokens = bert_tokenizer.convert_ids_to_tokens(input_ids)
+  print("Tokens:\n{}".format(input_tokens))
+  token_type_ids = bert_tokenizer.create_token_type_ids_from_sequences(question_ids, sentence_ids)
+  start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
+
+  return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
+
+  # return bert_tokenizer.convert_ids_to_tokens(input_ids)
+  # input_text = "[CLS] " + question_text + " [SEP] " + sentence_text + " [SEP]"
+  
+  # print("Tokens: " + BertTokenizer.convert_tokens_to_string(input_ids))
+  # token_type_ids = [0 if i <= input_ids.index(102) else 1 for i in range(len(input_ids))]
+  # print([(input_ids[i], token_type_ids[i]) for i in range(len(input_ids))])
+  # start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
+  # input_tokens = bert_tokenizer.convert_ids_to_tokens(input_ids)
+  
+  # return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
+
+
+
+
+
+def test_extract_answer(idx):
+  return extract_answer(S1A1[idx], get_best_sent(S1A1[idx]))
+
+
+
+
+
 # ============= testing function to be called by user =============
 
 def get_best_sent(question_text, verbose=True):
@@ -341,8 +386,9 @@ if __name__ == '__main__':
     sc1 = [{ORTH: "ca."}]
     nlp.tokenizer.add_special_case("ca.", sc1)
     doc = nlp(text)
+    bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    bert_model = BertForQuestionAnswering.from_pretrained("bert-large-uncased-whole-word-masking-finetuned-squad")
 
-    model = QA("model")
 
 
 

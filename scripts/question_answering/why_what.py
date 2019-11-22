@@ -35,9 +35,9 @@ def get_text(path):
 
 
 # In[155]:
+path = "data/Development_data/set1/a1.txt"
 
-
-sentences = get_text('path to file')
+sentences = get_text(path)
 
 
 for sentence in sentences:
