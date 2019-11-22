@@ -1,12 +1,14 @@
 import spacy
 import itertools
 import numpy as np
+import torch
 import sys
 from spacy import displacy
 from spacy.symbols import ORTH
 from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
+from transformers import BertTokenizer, BertForQuestionAnswering
 
 
 YES_NO_WORDS = ["can", "could", "would", "is", "does", "has", "was", "were", "had", "have", "did", "are", "will"]
@@ -240,7 +242,7 @@ def get_bm25(query, labels, n):
   return scored_sents[:n]
 
 
-# TODO: add comments
+# TODO: fix and add comments
 def pattern_match(question_text):
   def match_defn12(sent, subj, defn_num):
     # match the first two patterns (x is answer, answer is x)
@@ -268,15 +270,30 @@ def pattern_match(question_text):
           return True
     return False
 
+  def all_stop(sent):
+    for tok in sent:
+      if not tok.is_stop:
+        return False
+    return True
+
   question = nlp(question_text)
   question_processed = process(question)
-  question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
-  """ question should only have one verb; we want to pattern match "What is a dog", but not
-      "What is a dog classified as" (the ranking function can handle the second example)
-  """
-  if len(question_verbs) == 1:
-    question_stem_lower = stem_and_lower(question)
-    if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
+  question_stem_lower = stem_and_lower(question)
+
+  if question_stem_lower[0] in ["who", "what", "where", "when"] and question_stem_lower[1] == "be" and len(question.ents) == 1:
+    qent = question.ents[0]
+    qremain = question_processed[:qent.start] + question_processed[qent.end:]
+    pred_remain = qremain[2:]
+
+    # TODO: fix this
+
+    #if all_stop(pred_remain):
+    question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
+    """ question should only have one verb; we want to pattern match "What is a dog", but not
+        "What is a dog classified as" (the ranking function can handle the second example)
+    """
+    if len(question_verbs) == 1:
+    #if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
       subjs = [tok for tok in list(question_processed[1].children) if (tok.dep_ in ["attr", "nsubj"]) \
                 and (tok.pos_ in ["NOUN", "PROPN"])]
       if len(subjs) == 1:
@@ -291,23 +308,70 @@ def pattern_match(question_text):
 
 
 
+
+
+def extract_answer(question_text, sentence_text):
+  # question_toks = [tok.text.lower() for tok in nlp(question_text)]
+  # sentence_toks = [tok.text.lower() for tok in nlp(sentence_text)]
+  # question_ids = bert_tokenizer.convert_tokens_to_ids(question_toks)
+  # sentence_ids = bert_tokenizer.convert_tokens_to_ids(sentence_toks)
+
+  print("Question:\n{}".format(question_text))
+  print("Sentence:\n{}".format(sentence_text))
+
+  question_ids = bert_tokenizer.encode(question_text)
+  sentence_ids = bert_tokenizer.encode(sentence_text)
+
+  input_ids = bert_tokenizer.build_inputs_with_special_tokens(question_ids, sentence_ids)
+  input_tokens = bert_tokenizer.convert_ids_to_tokens(input_ids)
+  print("Tokens:\n{}".format(input_tokens))
+  token_type_ids = bert_tokenizer.create_token_type_ids_from_sequences(question_ids, sentence_ids)
+  start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
+
+  return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
+
+  # return bert_tokenizer.convert_ids_to_tokens(input_ids)
+  # input_text = "[CLS] " + question_text + " [SEP] " + sentence_text + " [SEP]"
+  
+  # print("Tokens: " + BertTokenizer.convert_tokens_to_string(input_ids))
+  # token_type_ids = [0 if i <= input_ids.index(102) else 1 for i in range(len(input_ids))]
+  # print([(input_ids[i], token_type_ids[i]) for i in range(len(input_ids))])
+  # start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
+  # input_tokens = bert_tokenizer.convert_ids_to_tokens(input_ids)
+  
+  # return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
+
+
+
+
+
+def test_extract_answer(idx):
+  return extract_answer(S1A1[idx], get_best_sent(S1A1[idx]))
+
+
+
+
+
 # ============= testing function to be called by user =============
 
-def get_best_sent(question_text):
+def get_best_sent(question_text, verbose=True):
   (answer_type, query) = process_question(question_text)
-  print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
+  if verbose:
+    print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
   pattern_matches = flatten(pattern_match(question_text))
   if len(pattern_matches) > 0:
-    print("Retrieval method: pattern match")
-    return pattern_matches[0].text
+    if verbose:
+      print("Retrieval method: pattern match")
+    return pattern_matches[0].text.replace("\n", "")
   else:
-    print("Retrieval method: ranking function")
+    if verbose:
+      print("Retrieval method: ranking function")
     labels = ENTITY_MAP[answer_type]
     ranked_sents = get_bm25(query, labels, 1)
     if len(ranked_sents) > 0:
-      return ranked_sents[0][1].text
+      return ranked_sents[0][1].text.replace("\n", "")
     else:
-      return list(doc.sents)[0].text
+      return list(doc.sents)[0].text.replace("\n", "")
 
   
 
@@ -322,6 +386,9 @@ if __name__ == '__main__':
     sc1 = [{ORTH: "ca."}]
     nlp.tokenizer.add_special_case("ca.", sc1)
     doc = nlp(text)
+    bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    bert_model = BertForQuestionAnswering.from_pretrained("bert-large-uncased-whole-word-masking-finetuned-squad")
+
 
 
 
