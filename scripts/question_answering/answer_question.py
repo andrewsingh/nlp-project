@@ -242,9 +242,11 @@ def get_bm25(query, labels, n):
   return scored_sents[:n]
 
 
-# TODO: fix and add comments
+
+# TODO: add comments
 def pattern_match(question_text):
-  def match_defn12(sent, subj, defn_num):
+  
+  def match_defn12(sent, subj, defn_num, subj_phrase_lower=None):
     # match the first two patterns (x is answer, answer is x)
     # if defn_num is 1, matches first pattern, else matches second pattern
     subj_word = subj.text.lower()
@@ -258,52 +260,80 @@ def pattern_match(question_text):
         tok_children_text = [child.text.lower() for child in list(tok.children)]
         if subj_word in tok_children_text:
           subj_idx = tok_children_text.index(subj_word)
-          if list(tok.children)[subj_idx].dep_ == subj_dep:
-            return True
+          subj_in_sent = list(tok.children)[subj_idx]
+          if subj_in_sent.dep_ == subj_dep:
+            if subj_phrase_lower == None:
+              return True
+            else:
+              # Handle multi-word subjects (subj_phrase_lower is not None)
+              subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in subj_in_sent.lefts]) + [subj_in_sent.text.lower()])
+              return subj_phrase_lower in subj_phrase_lower_in_sent
     return False
     
-  def match_defn_appos(sent, subj):
+    
+  def match_defn_appos(sent, subj, subj_phrase_lower=None):
     subj_word = subj.text.lower()
     for tok in sent:
       if tok.text.lower() == subj_word and (tok.pos_ in ["NOUN", "PROPN"]) \
-        and "appos" in [child.dep_ for child in tok.children]:
+        and (tok.dep_ == "appos" or "appos" in [child.dep_ for child in tok.children]):
+        if subj_phrase_lower == None:
           return True
+        else:
+          # Handle multi-word subjects (subj_phrase_lower is not None)
+          subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in tok.lefts]) + [tok.text.lower()])
+          return subj_phrase_lower in subj_phrase_lower_in_sent
+      
     return False
 
-  def all_stop(sent):
-    for tok in sent:
-      if not tok.is_stop:
-        return False
-    return True
-
+  
+  def get_matches(subj, subj_phrase_lower=None):
+    matches1 = [sent for sent in doc.sents if match_defn12(sent, subj, 1, subj_phrase_lower)]
+    matches2 = [sent for sent in doc.sents if match_defn12(sent, subj, 2, subj_phrase_lower)]
+    matches_appos = [sent for sent in doc.sents if match_defn_appos(sent, subj, subj_phrase_lower)]
+    return [matches1, matches2, matches_appos]
+  
+  
   question = nlp(question_text)
   question_processed = process(question)
   question_stem_lower = stem_and_lower(question)
 
-  if question_stem_lower[0] in ["who", "what", "where", "when"] and question_stem_lower[1] == "be" and len(question.ents) == 1:
-    qent = question.ents[0]
-    qremain = question_processed[:qent.start] + question_processed[qent.end:]
-    pred_remain = qremain[2:]
-
-    # TODO: fix this
-
-    #if all_stop(pred_remain):
+  if question_stem_lower[0] in ["who", "what", "where", "when"] and question_stem_lower[1] == "be":
     question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
     """ question should only have one verb; we want to pattern match "What is a dog", but not
-        "What is a dog classified as" (the ranking function can handle the second example)
+    "What is a dog classified as" (the ranking function can handle the second example) 
     """
-    if len(question_verbs) == 1:
-    #if question_stem_lower[0] in ["who", "what"] and question_stem_lower[1] == "be":
-      subjs = [tok for tok in list(question_processed[1].children) if (tok.dep_ in ["attr", "nsubj"]) \
-                and (tok.pos_ in ["NOUN", "PROPN"])]
+    # Special case where we allow "where" questions to have a second verb: "located"
+    # (for example, "Where is New York located?")
+    where_located_case = (question_stem_lower[0] == "where" and len(question_verbs) == 2 and question_verbs[1].lemma_.lower() == "locate")
+    print("where_located_case: {}".format(where_located_case))
+    if len(question_verbs) == 1 or where_located_case:
+      verb_idx = 0
+      if where_located_case:
+        verb_idx = 1
+      subjs = [tok for tok in list(question_verbs[verb_idx].children) if (tok.dep_ in ["attr", "nsubj"]) \
+        and (tok.pos_ in ["NOUN", "PROPN"])]
+      print("subjs: " + str(subjs))
       if len(subjs) == 1:
         subj = subjs[0]
-        #print("Pattern match subj: " + subj.text)
-        matches1 = [sent for sent in doc.sents if match_defn12(sent, subj, 1)]
-        matches2 = [sent for sent in doc.sents if match_defn12(sent, subj, 2)]
-        matches_appos = [sent for sent in doc.sents if match_defn_appos(sent, subj)]
-        return [matches1, matches2, matches_appos]
-      
+        # Make sure the subject is an entity, not a common noun
+        # (although should try to handle this case as well)
+        if len(nlp("{} is {}?".format(question_processed[0].text, subj)).ents) >= 1:
+          if question_stem_lower[0] == "who":
+            # "who" question, can just use the single-word subj (likely a name)
+            # TODO: what if subj is a last name, and multiple ents in the article share that last name?
+            print("Pattern match subj: " + subj.text)
+            return get_matches(subj)
+          else:
+            # not a "who" question, get the whole entity
+            qent = question.ents[0]
+            subj_phrase_lower = qent.text.lower()
+            if subj.text.lower() in subj_phrase_lower:
+              if subj.text.lower() == subj_phrase_lower:
+                return get_matches(subj)
+              print("Pattern match subj phrase: " + subj_phrase_lower)
+              return get_matches(subj, subj_phrase_lower)
+   
+     
   return []
 
 
@@ -328,7 +358,7 @@ def extract_answer(question_text, sentence_text):
   token_type_ids = bert_tokenizer.create_token_type_ids_from_sequences(question_ids, sentence_ids)
   start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
 
-  return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
+  return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1]).replace(" ##", "")
 
   # return bert_tokenizer.convert_ids_to_tokens(input_ids)
   # input_text = "[CLS] " + question_text + " [SEP] " + sentence_text + " [SEP]"
@@ -345,8 +375,12 @@ def extract_answer(question_text, sentence_text):
 
 
 
-def test_extract_answer(idx):
-  return extract_answer(S1A1[idx], get_best_sent(S1A1[idx]))
+def test_extract_answer(idx, sent=None):
+  if sent == None:
+    sent = get_best_sent(S1A1[idx])
+  return extract_answer(S1A1[idx], sent)
+  
+
 
 
 
