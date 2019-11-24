@@ -9,6 +9,9 @@ from collections import Counter
 from collections import defaultdict
 from rank_bm25 import BM25Okapi
 from transformers import BertTokenizer, BertForQuestionAnswering
+import warnings
+
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 
 YES_NO_WORDS = ["can", "could", "would", "is", "does", "has", "was", "were", "had", "have", "did", "are", "will"]
@@ -17,7 +20,7 @@ QUESTION_WORDS = ["who", "what", "where", "when", "why", "how", "whose", "which"
 
 ENTITY_MAP = defaultdict(lambda: [], 
               {"PERSON": ["PERSON", "ORG"],  # NER sometimes mistakes persons for orgs and vice versa
-              "LOCATION": ["FAC", "GPE", "LOC"], # TODO: is this enough? Need to do some more testing
+              "LOCATION": ["FAC", "GPE", "LOC", "NORP", "ORG"], # TODO: is this enough? Need to do some more testing. Maybe add ORG?
               "DATE": ["DATE", "TIME", "CARDINAL"], # Sometimes labels [year] BC as CARDINAL ORG
               "NUMBER": ["PERCENT", "MONEY", "QUANTITY", "CARDINAL", "ORDINAL"]})
 
@@ -39,6 +42,9 @@ S1A1 =  ["What did Sahure command?",
           "How did ship builders keep their ships assembled?",
           "Was Menkauhor Kaiu one of the last Pharaohs of the Fifth Dynasty?",
           "Was the first Pharaoh of the Old Kingdom Djoser or Snefru?"]
+
+
+
 
 
 # ============= simple helper functions =============
@@ -92,6 +98,7 @@ def flatten(nested_list):
 
 
 
+
 # ============= more complex helper functions =============
 
 def stem_query(query, sent):
@@ -109,9 +116,9 @@ def stem_query(query, sent):
   return result
 
 
-def filter_sents_ner(doc, labels, query_ents):
-  def has_label(sent):
-    sent_labels = [ent.label_ for ent in sent.ents]
+def filter_sents_ner(qword, qents, labels):
+  def has_label(sent, exclude_ent=None):
+    sent_labels = [ent.label_ for ent in sent.ents if (exclude_ent == None or ent.text != exclude_ent.text)]
     for label in labels:
       if label in sent_labels:
         return True
@@ -119,15 +126,20 @@ def filter_sents_ner(doc, labels, query_ents):
 
   # backup in case an entity was mislabled
   def has_query_ent(sent):
-    for ent in query_ents:
-      """ as long as an ent in sent.ents has the same text as ent (label can be different), 
-        'ent in sent.ents' will be True """
-      if ent in sent.ents: 
+    for ent in qents:
+      if ent.text in [sent_ent.text for sent_ent in sent.ents]: 
         return True
     return False
-
+  
   if len(labels) > 0:
-    return [sent for sent in doc.sents if has_label(sent) or has_query_ent(sent)]
+    exclude_ent = None
+    if qword == "where":
+      exclude_ents = [ent for ent in qents if ent.label_ in ENTITY_MAP["LOCATION"]]
+      if len(exclude_ents) > 0:
+        exclude_ent = exclude_ents[0]
+        print("exclude_ent: {}".format(exclude_ent))
+    
+    return [sent for sent in doc.sents if (has_label(sent, exclude_ent) or (qword != "where" and has_query_ent(sent)))]
   else:
     return [sent for sent in doc.sents if len(stem_and_lower(sent)) > 0]
 
@@ -223,9 +235,7 @@ def ave_dist_sent(query, sent_stem_lower, no_stop=False):
   return sum([get_dist(sent_stem_lower, query_unique_toks[pair[0]], query_unique_toks[pair[1]]) for pair in pair_indices]) / len(pair_indices)
 
 
-def get_bm25(query, labels, n):
-  query_stem_lower = stem_and_lower(query)
-  sents_filtered = filter_sents_ner(doc, labels, query.ents)
+def get_bm25(query, sents_filtered, n):
   queries_stem = [stem_query(query, sent) for sent in sents_filtered]
   sents_stem_lower = [stem_and_lower(sent) for sent in sents_filtered]
   bm25 = BM25Okapi(sents_stem_lower)
@@ -243,8 +253,15 @@ def get_bm25(query, labels, n):
 
 
 
+
+
 # TODO: add comments
-def pattern_match(question_text):
+def pattern_match(question_text, sents_filtered):
+  
+  question = nlp(question_text)
+  question_processed = process(question)
+  question_stem_lower = stem_and_lower(question)
+  qword = question_stem_lower[0]
   
   def match_defn12(sent, subj, defn_num, subj_phrase_lower=None):
     # match the first two patterns (x is answer, answer is x)
@@ -274,30 +291,24 @@ def pattern_match(question_text):
   def match_defn_appos(sent, subj, subj_phrase_lower=None):
     subj_word = subj.text.lower()
     for tok in sent:
-      if tok.text.lower() == subj_word and (tok.pos_ in ["NOUN", "PROPN"]) \
-        and (tok.dep_ == "appos" or "appos" in [child.dep_ for child in tok.children]):
+      if tok.text.lower() == subj_word and (tok.pos_ in ["NOUN", "PROPN"])         and (tok.dep_ == "appos" or "appos" in [child.dep_ for child in tok.children]):
         if subj_phrase_lower == None:
           return True
         else:
           # Handle multi-word subjects (subj_phrase_lower is not None)
           subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in tok.lefts]) + [tok.text.lower()])
           return subj_phrase_lower in subj_phrase_lower_in_sent
-      
     return False
 
   
-  def get_matches(subj, subj_phrase_lower=None):
-    matches1 = [sent for sent in doc.sents if match_defn12(sent, subj, 1, subj_phrase_lower)]
-    matches2 = [sent for sent in doc.sents if match_defn12(sent, subj, 2, subj_phrase_lower)]
-    matches_appos = [sent for sent in doc.sents if match_defn_appos(sent, subj, subj_phrase_lower)]
+  def get_matches(qword, subj, subj_phrase_lower=None):
+    matches1 = [sent for sent in sents_filtered if match_defn12(sent, subj, 1, subj_phrase_lower)]
+    matches2 = [sent for sent in sents_filtered if match_defn12(sent, subj, 2, subj_phrase_lower)]
+    matches_appos = [sent for sent in sents_filtered if match_defn_appos(sent, subj, subj_phrase_lower)]
     return [matches1, matches2, matches_appos]
   
-  
-  question = nlp(question_text)
-  question_processed = process(question)
-  question_stem_lower = stem_and_lower(question)
 
-  if question_stem_lower[0] in ["who", "what", "where", "when"] and question_stem_lower[1] == "be":
+  if qword in ["who", "what", "where", "when"] and question_stem_lower[1] == "be":
     question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
     """ question should only have one verb; we want to pattern match "What is a dog", but not
     "What is a dog classified as" (the ranking function can handle the second example) 
@@ -305,47 +316,81 @@ def pattern_match(question_text):
     # Special case where we allow "where" questions to have a second verb: "located"
     # (for example, "Where is New York located?")
     where_located_case = (question_stem_lower[0] == "where" and len(question_verbs) == 2 and question_verbs[1].lemma_.lower() == "locate")
-    print("where_located_case: {}".format(where_located_case))
     if len(question_verbs) == 1 or where_located_case:
       verb_idx = 0
       if where_located_case:
         verb_idx = 1
-      subjs = [tok for tok in list(question_verbs[verb_idx].children) if (tok.dep_ in ["attr", "nsubj"]) \
-        and (tok.pos_ in ["NOUN", "PROPN"])]
+      subjs = [tok for tok in list(question_verbs[verb_idx].children) if (tok.dep_ in ["attr", "nsubj"])         and (tok.pos_ in ["NOUN", "PROPN"])]
       print("subjs: " + str(subjs))
       if len(subjs) == 1:
         subj = subjs[0]
         # Make sure the subject is an entity, not a common noun
         # (although should try to handle this case as well)
-        if len(nlp("{} is {}?".format(question_processed[0].text, subj)).ents) >= 1:
-          if question_stem_lower[0] == "who":
+        #if len(nlp("{} is {}?".format(question_processed[0].text, subj)).ents) >= 1:
+        if len(question.ents) >= 1:
+          if qword == "who":
             # "who" question, can just use the single-word subj (likely a name)
             # TODO: what if subj is a last name, and multiple ents in the article share that last name?
             print("Pattern match subj: " + subj.text)
-            return get_matches(subj)
+            return get_matches(qword, subj)
           else:
             # not a "who" question, get the whole entity
             qent = question.ents[0]
             subj_phrase_lower = qent.text.lower()
+            print("subj_phrase_lower: {}".format(subj_phrase_lower))
             if subj.text.lower() in subj_phrase_lower:
               if subj.text.lower() == subj_phrase_lower:
-                return get_matches(subj)
+                return get_matches(qword, subj)
               print("Pattern match subj phrase: " + subj_phrase_lower)
-              return get_matches(subj, subj_phrase_lower)
-   
-     
+              return get_matches(qword, subj, subj_phrase_lower)
+        
   return []
 
 
 
 
+def get_best_sent(question_text, verbose=True):
+  question = nlp(question_text)
+  question_stem_lower = stem_and_lower(question)
+  qword = question_stem_lower[0]
+  (answer_type, query) = process_question(question_text)
+  if verbose:
+    print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
+    
+  sents_filtered = list(doc.sents)
+  if qword == "where":
+    sents_filtered = filter_sents_ner(qword, question.ents, ENTITY_MAP["LOCATION"])
+  elif qword == "when":
+    sents_filtered = filter_sents_ner(qword, question.ents, ENTITY_MAP["DATE"])
+    
+  pattern_matches = flatten(pattern_match(question_text, sents_filtered))
+  if len(pattern_matches) > 0:
+    if verbose:
+      print("Retrieval method: pattern match")
+    #return pattern_matches[0].text.replace("\n", "")
+    return pattern_matches
+  else:
+    if verbose:
+      print("Retrieval method: ranking function")
+    
+    sents_filtered = filter_sents_ner(qword, question.ents, ENTITY_MAP[answer_type])
+    print("Sents remaining: {} of {}".format(len(sents_filtered), len(list(doc.sents))))
+    if len(sents_filtered) == 0:
+      sents_filtered = list(doc.sents)
+      print("Warning: all sentences filtered out, skipping NER filter step")
+    
+    ranked_sents = get_bm25(query, sents_filtered, 5)
+    if len(ranked_sents) > 0:
+      return ranked_sents
+      #return ranked_sents[0][1].text.replace("\n", "")
+    else:
+      return []
+      #return list(doc.sents)[0].text.replace("\n", "")
+
+
+
 
 def extract_answer(question_text, sentence_text):
-  # question_toks = [tok.text.lower() for tok in nlp(question_text)]
-  # sentence_toks = [tok.text.lower() for tok in nlp(sentence_text)]
-  # question_ids = bert_tokenizer.convert_tokens_to_ids(question_toks)
-  # sentence_ids = bert_tokenizer.convert_tokens_to_ids(sentence_toks)
-
   print("Question:\n{}".format(question_text))
   print("Sentence:\n{}".format(sentence_text))
 
@@ -360,18 +405,6 @@ def extract_answer(question_text, sentence_text):
 
   return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1]).replace(" ##", "")
 
-  # return bert_tokenizer.convert_ids_to_tokens(input_ids)
-  # input_text = "[CLS] " + question_text + " [SEP] " + sentence_text + " [SEP]"
-  
-  # print("Tokens: " + BertTokenizer.convert_tokens_to_string(input_ids))
-  # token_type_ids = [0 if i <= input_ids.index(102) else 1 for i in range(len(input_ids))]
-  # print([(input_ids[i], token_type_ids[i]) for i in range(len(input_ids))])
-  # start_logits, end_logits = bert_model(torch.tensor([input_ids]), token_type_ids=torch.tensor([token_type_ids]))
-  # input_tokens = bert_tokenizer.convert_ids_to_tokens(input_ids)
-  
-  # return " ".join(input_tokens[torch.argmax(start_logits) : torch.argmax(end_logits) + 1])
-
-
 
 
 
@@ -379,35 +412,9 @@ def test_extract_answer(idx, sent=None):
   if sent == None:
     sent = get_best_sent(S1A1[idx])
   return extract_answer(S1A1[idx], sent)
-  
 
 
 
-
-
-
-# ============= testing function to be called by user =============
-
-def get_best_sent(question_text, verbose=True):
-  (answer_type, query) = process_question(question_text)
-  if verbose:
-    print("Question: {}\nQuery: {}\nAnswer type: {}".format(question_text, query, answer_type))
-  pattern_matches = flatten(pattern_match(question_text))
-  if len(pattern_matches) > 0:
-    if verbose:
-      print("Retrieval method: pattern match")
-    return pattern_matches[0].text.replace("\n", "")
-  else:
-    if verbose:
-      print("Retrieval method: ranking function")
-    labels = ENTITY_MAP[answer_type]
-    ranked_sents = get_bm25(query, labels, 1)
-    if len(ranked_sents) > 0:
-      return ranked_sents[0][1].text.replace("\n", "")
-    else:
-      return list(doc.sents)[0].text.replace("\n", "")
-
-  
 
 
 if __name__ == '__main__':
@@ -422,6 +429,10 @@ if __name__ == '__main__':
     doc = nlp(text)
     bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
     bert_model = BertForQuestionAnswering.from_pretrained("bert-large-uncased-whole-word-masking-finetuned-squad")
+
+
+
+
 
 
 
