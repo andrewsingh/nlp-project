@@ -1,0 +1,10 @@
+What is the domestic dog classified as under the Biological Species Concept?[SEP]Canis lupus familiaris
+What is the domestic dog classified as under the Evolutionary Species Concept?[SEP]Canis familiaris
+What is an adult male capable of reproduction called?[SEP]stud
+What genus is the dog a member of?[SEP]Canis
+What genus is the dog in?[SEP]Canis
+What nickname has been given to dogs?[SEP]man's best friend
+What Latin word means dog?[SEP]Canis
+What is countershading?[SEP]a common natural camouflage pattern
+What is one of the primary functions of a dog's tail?[SEP]communicate their emotional state
+What is one of the main purposes of a dog's tail?[SEP]communicate their emotional state
