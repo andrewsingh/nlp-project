@@ -33,6 +33,20 @@ bert_model = BertForQuestionAnswering.from_pretrained("bert-large-cased-whole-wo
 
 # ============= simple helper functions =============
 
+def get_text(path):
+  def trim(lines):
+    for i in range(len(lines)):
+      line_txt = lines[i].replace("\n", "")
+      if line_txt == "See also" or line_txt == "Notes" or line_txt == "References":
+        return lines[:i]
+    return lines
+
+  with open(path, "r", encoding="utf-8") as file:
+    lines = file.readlines()
+    sents = [line for line in trim(lines) if "." in line]
+
+  return "".join(sents)
+
 
 def stem_and_lower(sent, no_stop=False):
   return [tok.lemma_.lower() for tok in sent if not tok.is_punct and not (no_stop and tok.is_stop)]
@@ -101,7 +115,6 @@ def filter_sents_ner(qword, qents, labels, doc):
     exclude_ents_text = []
     if qword == "where":
       exclude_ents_text = list(set([ent.text for ent in qents if ent.label_ in ENTITY_MAP["LOCATION"]]))
-      #print("exclude_ents_text: {}".format(exclude_ents_text))
     return [sent for sent in doc.sents if has_label(sent, exclude_ents_text)]
   else:
     return [sent for sent in doc.sents if len(stem_and_lower(sent)) > 0]
@@ -120,7 +133,6 @@ def process_question(question_text):
   for (idx, tok) in enumerate([tok for tok in question]):
     if tok.text.lower() in QUESTION_WORDS:
       question_word = tok.text.lower()
-      #question_start = idx
       break
     elif tok.lemma_.lower() in YES_NO_STEMS:
       has_yes_no = True
@@ -208,7 +220,7 @@ def pattern_match(question, question_ents, sents_filtered, doc):
             if subj_phrase_lower == None:
               return True
             else:
-              # Handle multi-word subjects (subj_phrase_lower is not None)
+              # handle multi-word subjects (subj_phrase_lower is not None)
               subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in subj_in_sent.lefts]) + [subj_in_sent.text.lower()])
               return subj_phrase_lower in subj_phrase_lower_in_sent
     return False
@@ -221,7 +233,7 @@ def pattern_match(question, question_ents, sents_filtered, doc):
         if subj_phrase_lower == None:
           return True
         else:
-          # Handle multi-word subjects (subj_phrase_lower is not None)
+          # handle multi-word subjects (subj_phrase_lower is not None)
           subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in tok.lefts]) + [tok.text.lower()])
           return subj_phrase_lower in subj_phrase_lower_in_sent
     return False
@@ -234,7 +246,7 @@ def pattern_match(question, question_ents, sents_filtered, doc):
         if subj_phrase_lower == None:
           return True
         else:
-          # Handle multi-word subjects (subj_phrase_lower is not None)
+          # handle multi-word subjects (subj_phrase_lower is not None)
           subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in tok.lefts]) + [tok.text.lower()])
           return subj_phrase_lower in subj_phrase_lower_in_sent
     return False
@@ -249,13 +261,13 @@ def pattern_match(question, question_ents, sents_filtered, doc):
   
 
   if qword in ["who", "what", "where", "when"]:
-    #  and question_stem_lower[1] == "be"
-    question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
+
     """ question should only have one verb; we want to pattern match "What is a dog", but not
     "What is a dog classified as" (the ranking function can handle the second example) 
     """
+    question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
     
-    # Special case where we allow "where" questions to have a second verb: "located"
+    # special case where we allow "where" questions to have a second verb: "located"
     # (for example, "Where is New York located?")
     where_located_case = (question_stem_lower[0] == "where" and len(question_verbs) == 2 and question_verbs[1].lemma_.lower() == "locate")
     if (len(question_verbs) == 1 and question_verbs[0].lemma_.lower() == "be") or where_located_case:
@@ -267,7 +279,7 @@ def pattern_match(question, question_ents, sents_filtered, doc):
     
       if len(subjs) == 1:
         subj = subjs[0]
-        # Make sure the subject is an entity, not a common noun
+        # make sure the subject is an entity, not a common noun
         # (although should try to handle this case as well)
         if len(question_ents) >= 1:
           if qword == "who":
@@ -364,7 +376,7 @@ def answer_yes_no(question_triple, question_ents, doc):
 
 
 
-# ============= question answering function =============
+# ============= question scoring function =============
 
 def score_question(question_text, doc):
   (answer_type, query, question) = process_question(question_text)

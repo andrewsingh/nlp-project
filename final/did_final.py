@@ -1,8 +1,8 @@
 import spacy
 from pattern.en import conjugate, SINGULAR, INFINITIVE
 from collections import defaultdict
+from answer import nlp, get_text, stem_and_lower
 
-nlp = spacy.load('en_core_web_lg')
 
 ENTITY_MAP = defaultdict(lambda: [],
                          {"PERSON": ["PERSON"],
@@ -12,21 +12,6 @@ ENTITY_MAP = defaultdict(lambda: [],
                                      "CARDINAL", "ORDINAL"]})
 
 
-def get_text(path):
-    def trim(lines):
-        for i in range(len(lines)):
-            line_txt = lines[i].replace("\n", "")
-            if line_txt == "See also" or line_txt == "Notes" \
-                    or line_txt == "References":
-                return lines[:i]
-        return lines
-
-    with open(path, "r", encoding='utf-8') as file:
-        lines = file.readlines()
-        sents = [line for line in trim(lines) if "." in line]
-
-    return "".join(sents)
-
 
 def has_label(sent, labels):
     sent_labels = [ent.label_ for ent in sent.ents]
@@ -34,12 +19,6 @@ def has_label(sent, labels):
         if label in sent_labels:
             return True
     return False
-
-
-def stem_and_lower(sent, no_stop=False):
-    return [tok.lemma_.lower() for tok in sent
-            if not tok.is_punct and not
-            (no_stop and tok.is_stop)]
 
 
 def filter_sents_ner(doc, labels):
@@ -105,10 +84,10 @@ def phrase_question(ques_pattern):
     if len(ques_pattern['additional']) > 0:
         form = ques_pattern['person name'][0] + ' ' + \
             ques_pattern['modified verb'][0] + ' ' + \
-            ques_pattern['additional'][0] + ' ?'
+            ques_pattern['additional'][0] + '?'
     else:
         form = ques_pattern['person name'][0] + ' ' + \
-            ques_pattern['modified verb'][0] + ' ?'
+            ques_pattern['modified verb'][0] + '?'
 
     if len(ques_pattern['object']) > 0:
         form = ques_pattern['wh-type'][0] + ' ' + \
