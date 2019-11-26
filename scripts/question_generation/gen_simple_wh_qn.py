@@ -177,6 +177,8 @@ def generate_what_qn(doc):
   questions = []
   seen_ents = []
   for ent in doc.ents:
+    if ent.text == "the central authority of the Pharaoh" or ent.text == "central authority of the Pharaoh":
+      print(ent.label_)
     if ent.label_ in ["ORG"] and ent.text not in seen_ents:
       seen_ents.append(ent.text)
       matched_patts = pattern_match("What is " + ent.text+"?", [ent], doc.sents)
@@ -198,7 +200,7 @@ def generate_what_qn(doc):
               questions.append("What is the " + ent.text +"?")
   return questions
 
-def generate_where_qn(doc):
+'''def generate_where_qn(doc):
   questions = []
   seen_ents = []
   for ent in doc.ents:
@@ -240,7 +242,12 @@ def generate_where_qn(doc):
               questions.append("Where are " + ent.text +"?")
             else:
               questions.append("Where is " + ent.text +"?")
-  return questions
+  return questions'''
+
+def generate_simple_qns(doc):
+  questions = []
+  questions += generate_who_qn(doc)
+  questions += generate_what_qn(doc)
 
 if __name__ == '__main__':
   args = sys.argv
@@ -257,7 +264,4 @@ if __name__ == '__main__':
     #doc._.coref_clusters
     #print(doc._.coref_resolved)
     questions = []
-    questions += generate_who_qn(doc)
-    questions += generate_what_qn(doc)
-    questions += generate_where_qn(doc)
     print(questions)
