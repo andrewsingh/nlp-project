@@ -84,7 +84,7 @@ if __name__ == '__main__':
     doc = nlp(text) 
     num_qns = int(sys.argv[2])
     qn_output1 = generate_simple_qns(doc)
-    qn_output2 = generate_questions(doc_path)
+    qn_output2 = list(set(generate_questions(doc_path)))
     qn_output2.sort(key = score, reverse = True)
     if len(qn_output1) + len(qn_output2) <= num_qns:
       qn_output = qn_output1 + qn_output2
