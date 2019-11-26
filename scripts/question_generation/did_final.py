@@ -109,10 +109,10 @@ def phrase_question(ques_pattern):
     if len(ques_pattern['additional']) > 0:
         form = ques_pattern['person name'][0] + ' ' + \
             ques_pattern['modified verb'][0] + ' ' + \
-            ques_pattern['additional'][0] + ' ?'
+            ques_pattern['additional'][0] + '?'
     else:
         form = ques_pattern['person name'][0] + ' ' + \
-            ques_pattern['modified verb'][0] + ' ?'
+            ques_pattern['modified verb'][0] + '?'
 
     if len(ques_pattern['object']) > 0:
         form = ques_pattern['wh-type'][0] + ' ' + \
