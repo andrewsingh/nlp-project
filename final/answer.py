@@ -369,24 +369,24 @@ def answer_yes_no(question_triple, question_ents, doc):
 def score_question(question_text, doc):
   (answer_type, query, question) = process_question(question_text)
   if answer_type == None:
-    return "unknown"
+    return -10
 
   question_ents = get_question_ents(question, doc)
     
   if answer_type == "YESNO":
     ans_bool = answer_yes_no((answer_type, query, question), question_ents, doc)
     if ans_bool:
-      return "yes"
+      return 20
     else:
-      return "no"
+      return 20
   else:
     (is_pattern_match, top_sent_entries) = get_best_sent((answer_type, query, question), question_ents, doc)
     if len(top_sent_entries) == 0:
-      return "unknown"
+      return -10
     
     if is_pattern_match:
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for (_, sent_text) in top_sent_entries], key=lambda x: x[0])
-      return (answer_score, answer)
+      return answer_score
     else:
       threshold = top_sent_entries[0][0] * 0.98
       best_sents_text = [sent_text for (score, sent_text) in top_sent_entries if score >= threshold]
