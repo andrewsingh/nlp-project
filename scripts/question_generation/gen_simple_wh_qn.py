@@ -2,6 +2,7 @@ import spacy
 import itertools
 import numpy as np
 import sys
+#import neuralcoref
 from spacy import displacy
 from spacy.symbols import ORTH
 from collections import Counter
@@ -61,47 +62,185 @@ def filter_sents_ner(doc, labels):
   else:
     return [sent for sent in doc.sents if len(stem_and_lower(sent)) > 0]
 
-#Matching based on dependency parses rules to generate patterns
-def pattern_match(doc):
-  def generate_who_qn(doc):
-    sents_filtered = filter_sents_ner(doc, ENTITY_MAP["PERSON"])
-    subj_dep = "attr"
-    questions = []
-    for sent in sents_filtered:
-      for tok in sent:
-        if tok.lemma_ == "be" and tok.pos_ in ["VERB", "AUX"]: 
-          # is, are, am, be, etc.
-          tok_ancestors = tok.ancestors
-          for ancestor in tok.ancestors:
-            if ancestor.ent_type_ in ENTITY_MAP["PERSON"]:
-              #tok_children_text = [child.text.lower() for child in list(tok.children)]
-              for child in tok.children:
-                if child.dep_ == subj_dep:
-                  questions.append("Who was " + ancestor.text + "?")
-                  #TODO: Expand out children text
-                  questions.append("Who was " + child.text +"?")
-            elif ancestor.dep_ == subj_dep:
-              for child in tok.children:
-                if child.ent_type_ in ENTITY_MAP["PERSON"]:
-                  questions.append("Who was " + ancestor.text + "?")
-                  #TODO: Expand out children text
-                  questions.append("Who was " + child.text +"?")
-    return questions
+# TODO: add comments
+def pattern_match(question_text, question_ents, sents_filtered, verbose=False):
+  
+  question = nlp(question_text)
+  question_processed = process(question)
+  question_stem_lower = stem_and_lower(question)
+  qword = question_stem_lower[0]
+  
+  def match_defn12(sent, subj, defn_num, subj_phrase_lower=None):
+    # match the first two patterns (x is answer, answer is x)
+    # if defn_num is 1, matches first pattern, else matches second pattern
+    subj_word = subj.text.lower()
+    if defn_num == 1:
+      subj_dep = "nsubj"
+    else:
+      subj_dep = "attr"
+    for tok in sent:
+      if tok.lemma_ == "be" and tok.pos_ in ["VERB", "AUX"]: # is, are, am, be, etc.
+        # get the children of the aux verb in the dependency parse
+        tok_children_text = [child.text.lower() for child in list(tok.children)]
+        if subj_word in tok_children_text:
+          subj_idx = tok_children_text.index(subj_word)
+          subj_in_sent = list(tok.children)[subj_idx]
+          if subj_in_sent.dep_ == subj_dep:
+            if subj_phrase_lower == None:
+              return True
+            else:
+              # Handle multi-word subjects (subj_phrase_lower is not None)
+              subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in subj_in_sent.lefts]) + [subj_in_sent.text.lower()])
+              return subj_phrase_lower in subj_phrase_lower_in_sent
+    return False
+    
+    
+  def match_defn_appos(sent, subj, subj_phrase_lower=None):
+    subj_word = subj.text.lower()
+    for tok in sent:
+      if tok.text.lower() == subj_word and (tok.pos_ in ["NOUN", "PROPN"]) and (tok.dep_ == "appos" or "appos" in [child.dep_ for child in tok.children]):
+        if subj_phrase_lower == None:
+          return True
+        else:
+          # Handle multi-word subjects (subj_phrase_lower is not None)
+          subj_phrase_lower_in_sent = " ".join(list([tok2.text.lower() for tok2 in tok.lefts]) + [tok.text.lower()])
+          return subj_phrase_lower in subj_phrase_lower_in_sent
+    return False
 
-  def generate_where_qn(doc):
-    sents_filtered = filter_sents_ner(doc, ENTITY_MAP["LOCATION"])
-    subj_dep = "attr"
-    questions = []
-    #Match for where patterns here.
-    return questions
+  
+  def get_matches(qword, subj, subj_phrase_lower=None, verbose=False):
+    matches1 = [sent for sent in sents_filtered if match_defn12(sent, subj, 1, subj_phrase_lower)]
+    matches2 = [sent for sent in sents_filtered if match_defn12(sent, subj, 2, subj_phrase_lower)]
+    matches_appos = [sent for sent in sents_filtered if match_defn_appos(sent, subj, subj_phrase_lower)]
+    return [matches1, matches2, matches_appos]
+  
 
-  #Currently just generating who qns.
-  return generate_who_qn(doc)
+  if qword in ["who", "what", "where", "when"] and question_stem_lower[1] == "be":
+    question_verbs = [tok for tok in question_processed if tok.pos_ in ["VERB", "AUX"]]
+    """ question should only have one verb; we want to pattern match "What is a dog", but not
+    "What is a dog classified as" (the ranking function can handle the second example) 
+    """
+    # Special case where we allow "where" questions to have a second verb: "located"
+    # (for example, "Where is New York located?")
+    where_located_case = (question_stem_lower[0] == "where" and len(question_verbs) == 2 and question_verbs[1].lemma_.lower() == "locate")
+    #print("where_located_case: {}".format(where_located_case))
+    if len(question_verbs) == 1 or where_located_case:
+      verb_idx = 0
+      if where_located_case:
+        verb_idx = 1
+      subjs = [tok for tok in list(question_verbs[verb_idx].children) if (tok.dep_ in ["attr", "nsubj"])         and (tok.pos_ in ["NOUN", "PROPN"])]
+      if verbose:
+        print("subjs: " + str(subjs))
+      if len(subjs) == 1:
+        subj = subjs[0]
+        # Make sure the subject is an entity, not a common noun
+        # (although should try to handle this case as well)
+        #if len(nlp("{} is {}?".format(question_processed[0].text, subj)).ents) >= 1:
+        if len(question_ents) >= 1:
+          if qword == "who":
+            # "who" question, can just use the single-word subj (likely a name)
+            # TODO: what if subj is a last name, and multiple ents in the article share that last name?
+            if verbose:
+              print("Pattern match subj: " + subj.text)
+            return get_matches(qword, subj)
+          else:
+            # not a "who" question, get the whole entity
+            subj_phrase_lower = min([ent.text.lower() for ent in question_ents], key=lambda x: len(x))
+            if verbose:
+              print("subj_phrase_lower: {}".format(subj_phrase_lower))
+            if subj.text.lower() in subj_phrase_lower:
+              if subj.text.lower() == subj_phrase_lower:
+                return get_matches(qword, subj)
+              if verbose:
+                print("Pattern match subj phrase: " + subj_phrase_lower)
+              return get_matches(qword, subj, subj_phrase_lower)
+              
+  return []
 
-def generate_qn(text):
-    #Pattern match on 
-    labels = ENTITY_MAP["PERSON"]
-    sents_filtered = filter_sents_ner(doc, labels, query.ents)
+def generate_who_qn(doc):
+  questions = []
+  seen_ents = []
+  for ent in doc.ents:
+    if ent.label_ == "PERSON" and ent.text not in seen_ents:
+      sub = ent[len(ent)-1].text
+      sub_present =[i for i in seen_ents if sub in i]
+      if len(sub_present) == 0: 
+        seen_ents.append(ent.text)
+        matched_patts = pattern_match("Who is " + ent.text+"?", [ent], doc.sents)
+        if matched_patts != []:
+          #print(matched_patts)
+          if matched_patts[2] == []:
+            questions.append("Who is " + ent.text +"?")
+  return questions
+
+def generate_what_qn(doc):
+  questions = []
+  seen_ents = []
+  for ent in doc.ents:
+    if ent.label_ in ["ORG"] and ent.text not in seen_ents:
+      seen_ents.append(ent.text)
+      matched_patts = pattern_match("What is " + ent.text+"?", [ent], doc.sents)
+      if matched_patts != []:
+        #print(matched_patts)
+        if matched_patts[2] == []:
+          left = ent[0]
+          if left.text.lower() == "the":
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]: 
+              questions.append("What are " + ent.text +"?")
+            else:
+              questions.append("What is " + ent.text +"?")
+          else:
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]:
+              questions.append("What are the " + ent.text +"?")
+            else:
+              questions.append("What is the " + ent.text +"?")
+  return questions
+
+def generate_where_qn(doc):
+  questions = []
+  seen_ents = []
+  for ent in doc.ents:
+    if ent.label_ in ["FAC", "LOC"] and ent.text not in seen_ents:
+      seen_ents.append(ent.text)
+      matched_patts = pattern_match("Where is " + ent.text+"?", [ent], doc.sents)
+      if matched_patts != []:
+        #print(matched_patts)
+        if matched_patts[2] == []:
+          left = ent[0]
+          if left.text.lower() == "the":
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]: 
+              questions.append("Where are " + ent.text +"?")
+            else:
+              questions.append("Where is " + ent.text +"?")
+          else:
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]:
+              questions.append("Where are the " + ent.text +"?")
+            else:
+              questions.append("Where is the " + ent.text +"?")
+    if ent.label_ in ["GPE"] and ent.text not in seen_ents:
+      seen_ents.append(ent.text)
+      matched_patts = pattern_match("Where is " + ent.text+"?", [ent], doc.sents)
+      if matched_patts != []:
+        #print(matched_patts)
+        if matched_patts[2] == []:
+          left = ent[0]
+          if left.text.lower() == "the":
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]: 
+              questions.append("Where are " + ent.text +"?")
+            else:
+              questions.append("Where is " + ent.text +"?")
+          else:
+            end = ent[len(ent)-1]
+            if end.pos_ in ["NNS", "NNPS"]:
+              questions.append("Where are " + ent.text +"?")
+            else:
+              questions.append("Where is " + ent.text +"?")
+  return questions
 
 if __name__ == '__main__':
   args = sys.argv
@@ -110,7 +249,15 @@ if __name__ == '__main__':
     doc_num = int(args[2])
     text = get_text("data/Development_data/set{}/a{}.txt".format(set_num, doc_num))
     nlp = spacy.load("en_core_web_lg")
+    #neuralcoref.add_to_pipe(nlp)
     sc1 = [{ORTH: "ca."}]
     nlp.tokenizer.add_special_case("ca.", sc1)
     doc = nlp(text)
-    print(pattern_match(doc))
+    #doc._.has_coref
+    #doc._.coref_clusters
+    #print(doc._.coref_resolved)
+    questions = []
+    questions += generate_who_qn(doc)
+    questions += generate_what_qn(doc)
+    questions += generate_where_qn(doc)
+    print(questions)
