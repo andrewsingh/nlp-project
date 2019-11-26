@@ -58,6 +58,7 @@ def generate_sents(doc):
     return(sents_filtered)
 
 
+# check_trans_verb() adapted from https://github.com/Mirith/Verb-categorizer/blob/master/transitivity.py
 def check_trans_verb(token):
     indirect_object = False
     direct_object = False
