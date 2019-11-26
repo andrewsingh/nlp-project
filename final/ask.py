@@ -13,6 +13,7 @@ from spacy.symbols import ORTH
 from collections import Counter
 from collections import defaultdict
 from did_final import generate_questions
+from answer import *
 
 
 ENTITY_MAP = defaultdict(lambda: [], 
@@ -295,10 +296,11 @@ if __name__ == '__main__':
     qn_output = generate_simple_qns(doc)
     qn_output += generate_questions(doc_path)
     if len(qn_output) > num_qns:
-      qn_output = out[:num_qns]
+      qn_output = qn_output[:num_qns]
 
-  for i in qn_output:
-    print(i)
+    for i in qn_output:
+      print(i)
+      print(answer_question(i, doc))
 
     '''nlp = spacy.load("en_core_web_lg")
     bert_tokenizer = BertTokenizer.from_pretrained("bert-large-cased")

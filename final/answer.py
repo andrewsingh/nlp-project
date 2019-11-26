@@ -27,28 +27,11 @@ ENTITY_MAP = defaultdict(lambda: [],
               "NUMBER": ["PERCENT", "MONEY", "QUANTITY", "CARDINAL", "ORDINAL"]})
 
 
+nlp = spacy.load("en_core_web_lg")
+bert_tokenizer = BertTokenizer.from_pretrained("bert-large-cased")
+bert_model = BertForQuestionAnswering.from_pretrained("bert-large-cased-whole-word-masking-finetuned-squad")
 
 # ============= simple helper functions =============
-
-def get_text(path):
-  def trim(lines):
-    for i in range(len(lines)):
-      line_txt = lines[i].replace("\n", "")
-      if line_txt == "See also" or line_txt == "Notes" or line_txt == "References":
-        return lines[:i]
-    return lines
-
-  with open(path, "r", encoding="utf-8") as file:
-    #text = file.read()
-    lines = file.readlines()
-    sents = [line for line in trim(lines) if "." in line]
-
-  return "".join(sents)
-
-
-def get_questions(path):
-    with open(path, "r", encoding="utf-8") as file:
-        return list(file.readlines())
 
 
 def stem_and_lower(sent, no_stop=False):
@@ -74,7 +57,7 @@ def post_process(sent):
 
 # ============= more complex helper functions =============
 
-def get_question_ents(question):
+def get_question_ents(question, doc):
   question_text = question.text
   ents_from_text = [((ent.text, ent.label_), ent) for ent in doc.ents if ent.text.lower() in question_text.lower()]
   ents_from_question = [((ent.text, ent.label_), ent) for ent in question.ents]
@@ -98,7 +81,7 @@ def stem_query(query, sent):
   
 
 
-def filter_sents_ner(qword, qents, labels):
+def filter_sents_ner(qword, qents, labels, doc):
   
   def has_label(sent, exclude_ents_text):
     sent_labels = [ent.label_ for ent in sent.ents if ent.text not in exclude_ents_text]
@@ -201,7 +184,7 @@ def get_bm25(query, sents_filtered, n):
 
 
 
-def pattern_match(question, question_ents, sents_filtered):
+def pattern_match(question, question_ents, sents_filtered, doc):
   question_processed = process(question)
   question_stem_lower = stem_and_lower(question)
   qword = question_stem_lower[0]
@@ -288,7 +271,7 @@ def pattern_match(question, question_ents, sents_filtered):
         # (although should try to handle this case as well)
         if len(question_ents) >= 1:
           if qword == "who":
-            if len(get_question_ents(nlp("Who is {}".format(subj)))) >= 1:
+            if len(get_question_ents(nlp("Who is {}".format(subj)), doc)) >= 1:
               # "who" question, can just use the single-word subj (likely a name)
               return get_matches(qword, subj)
           else:
@@ -303,22 +286,22 @@ def pattern_match(question, question_ents, sents_filtered):
 
 
 
-def get_best_sent(question_triple, question_ents):
+def get_best_sent(question_triple, question_ents, doc):
   (answer_type, query, question) = question_triple
   question_stem_lower = stem_and_lower(question)
   qword = question_stem_lower[0]
     
   sents_filtered = list(doc.sents)
   if qword == "where":
-    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP["LOCATION"])
+    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP["LOCATION"], doc)
   elif qword == "when":
-    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP["DATE"])
+    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP["DATE"], doc)
     
-  matches = flatten(pattern_match(question, question_ents, sents_filtered))
+  matches = flatten(pattern_match(question, question_ents, sents_filtered, doc))
   if len(matches) > 0:
     return (True, [(-1, post_process(sent)) for sent in matches])
   else:    
-    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP[answer_type])
+    sents_filtered = filter_sents_ner(qword, question_ents, ENTITY_MAP[answer_type], doc)
     if len(sents_filtered) == 0:
       sents_filtered = list(doc.sents)
     
@@ -353,7 +336,7 @@ def extract_answer(question_text, sentence_text):
 
 
 
-def answer_yes_no(question_triple, question_ents):
+def answer_yes_no(question_triple, question_ents, doc):
   (answer_type, query, question) = question_triple
   subj = next((tok for tok in question if tok.dep_ == "nsubj"), None)
   
@@ -383,62 +366,33 @@ def answer_yes_no(question_triple, question_ents):
 
 # ============= question answering function =============
 
-def answer_question(question_text, include_score=False):
+def answer_question(question_text, doc):
   (answer_type, query, question) = process_question(question_text)
   if answer_type == None:
     return "unknown"
 
-  question_ents = get_question_ents(question)
+  question_ents = get_question_ents(question, doc)
     
   if answer_type == "YESNO":
-    ans_bool = answer_yes_no((answer_type, query, question), question_ents)
+    ans_bool = answer_yes_no((answer_type, query, question), question_ents, doc)
     if ans_bool:
       return "yes"
     else:
       return "no"
   else:
-    (is_pattern_match, top_sent_entries) = get_best_sent((answer_type, query, question), question_ents)
+    (is_pattern_match, top_sent_entries) = get_best_sent((answer_type, query, question), question_ents, doc)
     if len(top_sent_entries) == 0:
       return "unknown"
     
     if is_pattern_match:
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for (_, sent_text) in top_sent_entries], key=lambda x: x[0])
-      if include_score:
-        return (answer_score, answer)
-      else:
-        return answer
+      return (answer_score, answer)
     else:
       threshold = top_sent_entries[0][0] * 0.98
       best_sents_text = [sent_text for (score, sent_text) in top_sent_entries if score >= threshold]
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for sent_text in best_sents_text], key=lambda x: x[0])
-      if include_score:
-        return (answer_score, answer)
-      else:
-        return answer
-
-
-# ============= main function =============
-
-if __name__ == '__main__':
-  args = sys.argv
-  if len(args) >= 3:
-    nlp = spacy.load("en_core_web_lg")
-    bert_tokenizer = BertTokenizer.from_pretrained("bert-large-cased")
-    bert_model = BertForQuestionAnswering.from_pretrained("bert-large-cased-whole-word-masking-finetuned-squad")
-
-    article_path = str(args[1])
-    questions_path = str(args[2])
-    text = get_text(article_path)
-    questions = get_questions(questions_path)
-    doc = nlp(text)
-    
-    for question in questions:
-      question_preprocessed = question.replace("\n", "").strip()
-      print(answer_question(question_preprocessed))
-
-      # print("Question: {}".format(question_processed))
-      # print("Answer: {}".format(answer_question(question_processed, include_score=True)))
-      # print()
+      return (answer_score, answer)
+      
 
   
 
