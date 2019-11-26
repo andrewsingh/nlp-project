@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
+
 import spacy
 import sys
-from did_final import generate_questions
 from answer import *
 
 
@@ -34,9 +35,6 @@ def intersection(a, b):
 
 def flatten(nested_list):
   return [elem for sub_list in nested_list for elem in sub_list]
-
-def serve_dep(ex):
-  displacy.serve(ex, style="dep")
 
 
 #Filter fn to grab sentences of various entities for pattern matching
@@ -214,22 +212,11 @@ if __name__ == '__main__':
     nlp = spacy.load("en_core_web_lg")
     doc_path = str(sys.argv[1])
     text = get_text(doc_path)
-    doc = nlp(text) 
+    doc = nlp(text)
     num_qns = int(sys.argv[2])
-    qn_output1 = generate_simple_qns(doc)
-    qn_output2 = generate_questions(doc_path)
-    qn_output1.sort(key = score, reverse = True)
-    qn_output2.sort(key = score, reverse = True)
-    if len(qn_output1) + len(qn_output2) <= num_qns:
-      qn_output = qn_output1 + qn_output2
-    else:
-      split = round(num_qns / 5 * 3)
-      if split >= len(qn_output1):
-        split = len(qn_output1) 
-      elif num_qns - split >= len(qn_output2):
-        split = num_qns - len(qn_output2)
-      qn_output = qn_output1[:split] + qn_output2[:(num_qns-split)]
-    for i in qn_output:
+    qn_output = generate_simple_qns(doc)
+    qn_output.sort(key = score, reverse = True)
+    for i in qn_output[:num_qns]:
       print(i)
       
 

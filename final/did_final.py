@@ -1,10 +1,6 @@
-#!/usr/bin/env python
-# coding: utf-8
-
 import spacy
 from pattern.en import conjugate, SINGULAR, INFINITIVE
 from collections import defaultdict
-from spacy.symbols import ORTH
 
 nlp = spacy.load('en_core_web_lg')
 
@@ -190,8 +186,6 @@ def generate_questions_per_line(sentence_list):
 
 def generate_questions(path):
     text = get_text(path)
-    sc1 = [{ORTH: "ca."}]
-    nlp.tokenizer.add_special_case("ca.", sc1)
     doc = nlp(text)
     sentence_list = generate_sents(doc)
     return(generate_questions_per_line(sentence_list))

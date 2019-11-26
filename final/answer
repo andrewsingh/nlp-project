@@ -383,7 +383,7 @@ def answer_yes_no(question_triple, question_ents):
 
 # ============= question answering function =============
 
-def answer_question(question_text, include_score=False):
+def answer_question(question_text):
   (answer_type, query, question) = process_question(question_text)
   if answer_type == None:
     return "unknown"
@@ -403,18 +403,12 @@ def answer_question(question_text, include_score=False):
     
     if is_pattern_match:
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for (_, sent_text) in top_sent_entries], key=lambda x: x[0])
-      if include_score:
-        return (answer_score, answer)
-      else:
-        return answer
+      return answer
     else:
       threshold = top_sent_entries[0][0] * 0.98
       best_sents_text = [sent_text for (score, sent_text) in top_sent_entries if score >= threshold]
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for sent_text in best_sents_text], key=lambda x: x[0])
-      if include_score:
-        return (answer_score, answer)
-      else:
-        return answer
+      return answer
 
 
 # ============= main function =============
@@ -436,9 +430,6 @@ if __name__ == '__main__':
       question_preprocessed = question.replace("\n", "").strip()
       print(answer_question(question_preprocessed))
 
-      # print("Question: {}".format(question_processed))
-      # print("Answer: {}".format(answer_question(question_processed, include_score=True)))
-      # print()
 
   
 
