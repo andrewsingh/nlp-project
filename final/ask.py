@@ -298,17 +298,17 @@ if __name__ == '__main__':
     num_qns = int(sys.argv[2])
     qn_output1 = generate_simple_qns(doc)
     qn_output2 = generate_questions(doc_path)
-    qn_output1_sorted = sort(qn_output1, key = score, reverse = True )
-    qn_output2_sorted = sort(qn_output1, key = score, reverse = True )
+    qn_output1.sort(key = score, reverse = True)
+    qn_output2.sort(key = score, reverse = True)
     if len(qn_output1) + len(qn_output2) <= num_qns:
-      qn_output = qn_output1_sorted + qn_output2_sorted
+      qn_output = qn_output1 + qn_output2
     else:
       split = round(num_qns / 5 * 3)
       if split >= len(qn_output1):
-        split = len(qn_output1)
+        split = len(qn_output1) 
       elif num_qns - split >= len(qn_output2):
         split = num_qns - len(qn_output2)
-      qn_output = qn_output1_sorted[:split] + qn_output2_sorted[:(num_qns-split)]
+      qn_output = qn_output1[:split] + qn_output2[:(num_qns-split)]
     for i in qn_output:
       print(i)
       
