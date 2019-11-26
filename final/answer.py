@@ -366,7 +366,7 @@ def answer_yes_no(question_triple, question_ents, doc):
 
 # ============= question answering function =============
 
-def answer_question(question_text, doc):
+def score_question(question_text, doc):
   (answer_type, query, question) = process_question(question_text)
   if answer_type == None:
     return "unknown"
@@ -391,7 +391,7 @@ def answer_question(question_text, doc):
       threshold = top_sent_entries[0][0] * 0.98
       best_sents_text = [sent_text for (score, sent_text) in top_sent_entries if score >= threshold]
       (answer_score, answer) = max([extract_answer(question.text, sent_text) for sent_text in best_sents_text], key=lambda x: x[0])
-      return (answer_score, answer)
+      return answer_score
       
 
   
