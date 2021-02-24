@@ -1,5 +1,7 @@
-# nlp-project
-Project for 11-411 Natural Language Processing
+# 11-411 NLP Project
+Team Met on Piazza's solution for Carnegie Mellon's 11-411 Natural Language Processing class project. The project is a Wikipedia question answering and generation system. Given a Wikipedia article, the system both answers questions about the content of the article and generates new questions about the article. We ended up placing 2nd in the class competition.
+
+To learn more about how our system works, watch this [video](https://youtu.be/6QDrZ24SIbc).
 
 ## Running the question answering testing script
 Checkout the repo and cd to the root.
